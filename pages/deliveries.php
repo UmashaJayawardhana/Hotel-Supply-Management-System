@@ -230,12 +230,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $rawQuantity = trim((string)($postedQuantities[$index] ?? ''));
             $rawNote = trim((string)($postedNotes[$index] ?? ''));
 
-            if ($rawDetailId === '' && $rawQuantity === '' && $rawNote === '') {
-                continue;
-            }
-
             if (!ctype_digit($rawDetailId) || (int)$rawDetailId <= 0) {
-                $errors[] = 'Invalid order item selected.';
                 continue;
             }
 
@@ -247,24 +242,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $seenDetailIds[$detailId] = true;
 
-            if ($rawQuantity === '' ||
-                !is_numeric($rawQuantity) ||
+            // If quantity is empty or 0, this item is not being delivered right now. Skip it without error.
+            if ($rawQuantity === '' || (is_numeric($rawQuantity) && (float)$rawQuantity <= 0.000001)) {
+                continue;
+            }
+
+            if (!is_numeric($rawQuantity) ||
                 !is_finite((float)$rawQuantity) ||
-                (float)$rawQuantity <= 0 ||
+                (float)$rawQuantity < 0 ||
                 (float)$rawQuantity > 999999999) {
-                $errors[] = 'Each included delivery item must have a valid quantity greater than zero.';
+                $errors[] = 'Delivery quantities must be valid positive numbers.';
+                continue;
+            }
+
+            $qtyFloat = round((float)$rawQuantity, 3);
+            if ($qtyFloat <= 0) {
                 continue;
             }
 
             $submittedRows[] = [
                 'order_detail_id' => $detailId,
-                'quantity' => round((float)$rawQuantity, 3),
+                'quantity' => $qtyFloat,
                 'notes' => $rawNote,
             ];
         }
 
         if (!$submittedRows) {
-            $errors[] = 'Enter at least one quantity to deliver.';
+            $errors[] = 'Enter a delivery quantity greater than zero for at least one item.';
         }
 
         try {
@@ -1069,7 +1073,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                                                 <input type="hidden" name="order_detail_id[]" value="<?= $detailId ?>">
                                                 <input type="number"
                                                        name="supplied_quantity[]"
-                                                       min="0.001"
+                                                       min="0"
                                                        max="<?= e(number_format($remaining, 3, '.', '')) ?>"
                                                        step="0.001"
                                                        value="<?= e($savedQty) ?>"
@@ -1087,7 +1091,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                             </div>
 
                             <p class="help" style="margin-top:10px">
-                                Leave the quantity blank for items not included in this delivery. Quantities cannot exceed the outstanding order quantity.
+                                Enter the quantity to deliver now. Leave blank or enter 0 for items not being delivered. As long as at least one item is being delivered, this can be saved as a draft or completed.
                             </p>
 
                             <div class="form-actions">
