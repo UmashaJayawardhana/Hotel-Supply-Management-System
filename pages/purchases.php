@@ -637,7 +637,11 @@ $ordersListStmt->execute($orderParams);
 $hotelOrders = $ordersListStmt->fetchAll(PDO::FETCH_ASSOC);
 
 $activeOrdersPendingCount = 0;
+$sumHotelOrdersOrderedQty = 0.0;
+$sumHotelOrdersNeededQty = 0.0;
 foreach ($hotelOrders as $hOrder) {
+    $sumHotelOrdersOrderedQty += (float)$hOrder['TotalOrderedQty'];
+    $sumHotelOrdersNeededQty += (float)$hOrder['TotalNeededQty'];
     if ((float)$hOrder['TotalNeededQty'] > 0.0001) {
         $activeOrdersPendingCount++;
     }
@@ -768,6 +772,9 @@ td.name{white-space:normal;min-width:140px}
 .status-pill-partially-delivered{background:#fffbeb;color:#b45309}
 .demand-search-input{padding:8px 12px;font-size:12px;border:1px solid #dfe4ed;border-radius:6px;width:100%;font-family:inherit;box-sizing:border-box}
 
+.print-only{display:none !important}
+.print-dropdown-item:hover{background:#f1f5f9;color:#1e293b}
+
 @media(max-width:1050px){
     .layout{grid-template-columns:1fr}
 }
@@ -780,6 +787,153 @@ td.name{white-space:normal;min-width:140px}
     .panel{padding:14px}
     .purchase-line{grid-template-columns:minmax(0,1fr) 70px 80px 32px;gap:5px}
     .demand-stats-row{grid-template-columns:1fr}
+}
+
+@media print {
+    @page {
+        size: A4 portrait;
+        margin: 10mm 10mm 12mm 10mm;
+    }
+    body {
+        background: #fff !important;
+        color: #111827 !important;
+        font-size: 11px !important;
+        line-height: 1.4 !important;
+    }
+    .app { display: block !important; }
+    .main { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+    .layout { display: block !important; }
+    .right-column { display: block !important; }
+    
+    /* Hide all elements that shouldn't be printed */
+    .sidebar,
+    .page-title,
+    .cards,
+    .filters,
+    .notice,
+    #purchaseFormPanel,
+    #purchaseHistoryPanel,
+    .no-print,
+    .demand-tabs,
+    .demand-search-input,
+    form[action="purchases.php"],
+    .actions,
+    .btn,
+    .remove-row {
+        display: none !important;
+    }
+
+    #hotelDemandPanel {
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        background: transparent !important;
+    }
+
+    /* Print-only elements show up */
+    .print-only {
+        display: block !important;
+    }
+    tr.print-only-tr, th.print-only, td.print-only {
+        display: table-cell !important;
+    }
+
+    /* Both demand tab contents show in print (unless filtered by print mode) */
+    .demand-tab-content {
+        display: block !important;
+        margin-bottom: 22px !important;
+        page-break-inside: auto;
+    }
+
+    #hotelDemandPanel.print-mode-items-only #tab-hotel-orders,
+    #hotelDemandPanel.print-mode-items-only .print-section-orders {
+        display: none !important;
+    }
+
+    #hotelDemandPanel.print-mode-orders-only #tab-total-demand,
+    #hotelDemandPanel.print-mode-orders-only .print-section-items {
+        display: none !important;
+    }
+
+    /* Tables formatting in print */
+    .table-wrap {
+        overflow: visible !important;
+    }
+    table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        font-size: 10px !important;
+        page-break-inside: auto;
+    }
+    thead {
+        display: table-header-group;
+    }
+    tfoot {
+        display: table-footer-group;
+    }
+    tr {
+        page-break-inside: avoid;
+        page-break-after: auto;
+    }
+    th, td {
+        padding: 5px 6px !important;
+        border: 1px solid #cbd5e1 !important;
+        white-space: normal !important;
+        vertical-align: middle !important;
+    }
+    th {
+        background: #f1f5f9 !important;
+        color: #1e293b !important;
+        font-weight: 700 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+    tfoot td {
+        background: #f8fafc !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    /* Stat chips print styling */
+    .demand-stats-row {
+        display: grid !important;
+        grid-template-columns: repeat(4, 1fr) !important;
+        gap: 8px !important;
+        margin-bottom: 14px !important;
+        page-break-inside: avoid !important;
+    }
+    .demand-chip {
+        border: 1px solid #cbd5e1 !important;
+        background: #f8fafc !important;
+        padding: 6px 10px !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+    .demand-chip strong {
+        font-size: 13px !important;
+    }
+    .demand-chip span.demand-chip-lbl {
+        font-size: 10px !important;
+        color: #475569 !important;
+    }
+
+    /* Status pills in print */
+    .pill {
+        border: 1px solid #cbd5e1 !important;
+        padding: 2px 5px !important;
+        font-size: 9px !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+    .status-pill-confirmed {
+        background: #dcfce7 !important;
+        color: #166534 !important;
+    }
+    .status-pill-partially-delivered {
+        background: #fef3c7 !important;
+        color: #92400e !important;
+    }
 }
 </style>
 </head>
@@ -810,17 +964,17 @@ td.name{white-space:normal;min-width:140px}
 </aside>
 
 <main class="main">
-    <div class="page-title">
+    <div class="page-title no-print">
         <h1>Market Purchases</h1>
         <p>Record goods purchased from market vendors and track purchase costs.</p>
     </div>
 
     <?php if ($flash): ?>
-        <div class="notice <?= e($flash['type']) ?>"><?= e($flash['text']) ?></div>
+        <div class="notice <?= e($flash['type']) ?> no-print"><?= e($flash['text']) ?></div>
     <?php endif; ?>
 
     <!-- SUMMARY CARDS -->
-    <div class="cards">
+    <div class="cards no-print">
         <div class="card">
             <span>Total purchases</span>
             <strong><?= $totalPurchases ?></strong>
@@ -837,7 +991,7 @@ td.name{white-space:normal;min-width:140px}
 
     <!-- VIEW DETAILS PANEL -->
     <?php if ($viewPurchase): ?>
-        <section class="panel" style="margin-bottom:20px">
+        <section class="panel no-print" style="margin-bottom:20px">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:15px;margin-bottom:15px;flex-wrap:wrap">
                 <div>
                     <h2 style="margin:0 0 5px">Purchase #<?= (int)$viewPurchase['PurchaseID'] ?></h2>
@@ -900,7 +1054,7 @@ td.name{white-space:normal;min-width:140px}
 
     <div class="layout">
         <!-- LEFT PANEL: RECORD / EDIT PURCHASE -->
-        <section class="panel">
+        <section class="panel no-print" id="purchaseFormPanel">
             <h2><?= $isEditing ? 'Edit Purchase' : 'Record Market Purchase' ?></h2>
 
             <?php if (!$vendors): ?>
@@ -1005,21 +1159,60 @@ td.name{white-space:normal;min-width:140px}
 
             <!-- PANEL 1: HOTEL ORDERS & ITEMS DEMAND -->
             <section class="panel" id="hotelDemandPanel">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+                <!-- PRINT ONLY HEADER -->
+                <div class="print-only demand-print-header">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1e293b;padding-bottom:10px;margin-bottom:14px">
+                        <div>
+                            <div style="font-size:11px;font-weight:700;color:#4658a9;text-transform:uppercase;letter-spacing:0.5px">Hotel Supply Management System</div>
+                            <h1 style="margin:2px 0 0;font-size:18px;color:#0f172a">Hotel Order Requirements (What to Purchase)</h1>
+                            <div style="font-size:11px;color:#475569;margin-top:2px">
+                                Market procurement requirements from Confirmed &amp; Partially Delivered Hotel Orders (still not delivered)
+                            </div>
+                        </div>
+                        <div style="text-align:right;font-size:10px;color:#475569;line-height:1.4">
+                            <div><strong>Printed:</strong> <?= date('Y-m-d H:i') ?></div>
+                            <div><strong>Filter:</strong> <?= e(ucwords(str_replace('_', ' ', $orderStatusFilter))) ?></div>
+                            <div><strong>Active Orders:</strong> <?= $activeOrdersPendingCount ?> pending delivery</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="no-print" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;flex-wrap:wrap">
                     <div>
                         <h2 style="margin:0 0 4px;font-size:17px">📋 Hotel Order Requirements (What to Purchase)</h2>
                         <p class="muted" style="margin:0">Live demand from confirmed hotel orders ready for market procurement (unconfirmed and cancelled orders are excluded).</p>
                     </div>
-                    <?php if ($hotelDemandItems): ?>
-                        <div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <!-- PRINT BUTTON GROUP WITH DROPDOWN -->
+                        <div class="print-dropdown-container" style="position:relative;display:inline-flex">
+                            <button type="button" class="btn secondary" onclick="executeDemandPrint('all')" title="Print complete procurement sheet (Items &amp; Orders)" style="padding:7px 11px;font-size:12px;display:inline-flex;align-items:center;gap:5px;border-top-right-radius:0;border-bottom-right-radius:0;border-right:1px solid #cbd5e1">
+                                🖨 Print Requirements
+                            </button>
+                            <button type="button" class="btn secondary" id="btnPrintMenuToggle" onclick="togglePrintMenu(event)" title="Print options" style="padding:7px 8px;font-size:12px;border-top-left-radius:0;border-bottom-left-radius:0">
+                                ▾
+                            </button>
+                            <div id="printDropdownMenu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:white;border:1px solid #cbd5e1;border-radius:7px;box-shadow:0 6px 16px rgba(0,0,0,0.12);z-index:999;min-width:260px;padding:6px 0">
+                                <a class="print-dropdown-item" href="javascript:void(0)" onclick="executeDemandPrint('all')" style="display:block;padding:8px 14px;color:#1e293b;text-decoration:none;font-size:12px;font-weight:600">
+                                    📄 Print All (Items &amp; Confirmed Orders)
+                                </a>
+                                <a class="print-dropdown-item" href="javascript:void(0)" onclick="executeDemandPrint('items')" style="display:block;padding:8px 14px;color:#334155;text-decoration:none;font-size:12px">
+                                    📦 Print Required Items Table Only
+                                </a>
+                                <a class="print-dropdown-item" href="javascript:void(0)" onclick="executeDemandPrint('orders')" style="display:block;padding:8px 14px;color:#334155;text-decoration:none;font-size:12px">
+                                    🏨 Print Confirmed Hotel Orders Only
+                                </a>
+                            </div>
+                        </div>
+
+                        <?php if ($hotelDemandItems): ?>
                             <button type="button" class="btn primary" id="btnTransferAllDemand" style="padding:7px 12px;font-size:12px" data-items="<?= e($hotelDemandItemsJson) ?>">
                                 ➕ Add All Needed Items to Purchase
                             </button>
-                        </div>
-                    <?php endif; ?>
+                        <?php endif; ?>
+                    </div>
                 </div>
 
-                <!-- STAT CHIPS -->
+                <!-- STAT CHIPS (QUANTITY TOTALS) -->
                 <div class="demand-stats-row">
                     <div class="demand-chip">
                         <span style="font-size:16px">📦</span>
@@ -1051,8 +1244,8 @@ td.name{white-space:normal;min-width:140px}
                     </div>
                 </div>
 
-                <!-- TABS NAV -->
-                <div class="demand-tabs">
+                <!-- TABS NAV (SCREEN ONLY) -->
+                <div class="demand-tabs no-print">
                     <button type="button" class="demand-tab-btn active" data-tab="tab-total-demand">
                         📦 Items to Purchase (<?= $itemsPendingPurchaseCount ?> needing purchase / <?= $totalDemandItemsCount ?> total)
                     </button>
@@ -1063,7 +1256,11 @@ td.name{white-space:normal;min-width:140px}
 
                 <!-- TAB 1: TOTAL ITEMS TO PURCHASE (AGGREGATED DEMAND) -->
                 <div class="demand-tab-content" id="tab-total-demand">
-                    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+                    <div class="print-only print-section-title print-section-items" style="font-weight:700;font-size:12px;margin:12px 0 6px;padding-bottom:3px;border-bottom:1px solid #cbd5e1;color:#1e293b">
+                        📦 SECTION 1: REQUIRED ITEMS TO PURCHASE (AGGREGATED HOTEL DEMAND)
+                    </div>
+
+                    <div class="no-print" style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
                         <input type="search" id="demandSearchInput" class="demand-search-input" placeholder="Search required item by code, name, or category..." style="max-width:280px">
                         
                         <form method="get" action="purchases.php" style="display:flex;gap:8px;align-items:center;margin:0">
@@ -1084,12 +1281,12 @@ td.name{white-space:normal;min-width:140px}
                             <thead>
                                 <tr>
                                     <th>Item Code</th>
-                                    <th>Item & Category</th>
-                                    <th style="text-align:right">Ordered</th>
-                                    <th style="text-align:right">Purchased</th>
-                                    <th style="text-align:right">Still Needed</th>
+                                    <th>Item &amp; Category</th>
+                                    <th style="text-align:right">Ordered Qty</th>
+                                    <th style="text-align:right">Purchased / Stock</th>
+                                    <th style="text-align:right">Still Needed (To Buy)</th>
                                     <th>From Orders</th>
-                                    <th style="text-align:center">Action</th>
+                                    <th class="no-print" style="text-align:center">Action</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1131,11 +1328,11 @@ td.name{white-space:normal;min-width:140px}
                                         <span class="pill" style="background:#f1f5f9;color:#334155;font-size:11px" title="<?= e($dItem['OrderBreakdown']) ?>">
                                             <?= (int)$dItem['OrderCount'] ?> order(s)
                                         </span>
-                                        <div class="muted" style="font-size:10px;margin-top:2px;max-width:160px;white-space:normal;overflow:hidden;text-overflow:ellipsis">
+                                        <div class="muted" style="font-size:10px;margin-top:2px;max-width:180px;white-space:normal;overflow:hidden;text-overflow:ellipsis">
                                             <?= e($dItem['OrderBreakdown']) ?>
                                         </div>
                                     </td>
-                                    <td style="text-align:center">
+                                    <td class="no-print" style="text-align:center">
                                         <?php if (!$isFulfilled): ?>
                                             <button type="button" class="btn secondary btn-add-demand-item" 
                                                 data-item-id="<?= (int)$dItem['ItemID'] ?>" 
@@ -1154,34 +1351,53 @@ td.name{white-space:normal;min-width:140px}
                                 <tr><td colspan="7" class="empty">No pending items found from confirmed hotel orders.</td></tr>
                             <?php endif; ?>
                             </tbody>
+                            <tfoot>
+                                <tr style="background:#f8fafc;font-weight:700;border-top:2px solid #cbd5e1">
+                                    <td colspan="2" style="text-align:right"><strong>TOTALS (<?= $totalDemandItemsCount ?> items):</strong></td>
+                                    <td style="text-align:right"><strong><?= number_format($totalOrderedQuantity, 2) ?></strong></td>
+                                    <td style="text-align:right"><strong style="color:#16a34a"><?= number_format($totalAlreadyPurchasedQty, 2) ?></strong></td>
+                                    <td style="text-align:right"><strong style="color:#e11d48;font-size:13px"><?= number_format($totalRemainingQuantity, 2) ?></strong></td>
+                                    <td><small><?= $itemsPendingPurchaseCount ?> item(s) pending purchase</small></td>
+                                    <td class="no-print"></td>
+                                </tr>
+                            </tfoot>
                         </table>
                     </div>
                 </div>
 
                 <!-- TAB 2: HOTEL ORDERS LIST -->
                 <div class="demand-tab-content" id="tab-hotel-orders" style="display:none">
+                    <div class="print-only print-section-title print-section-orders" style="font-weight:700;font-size:12px;margin:18px 0 6px;padding-bottom:3px;border-bottom:1px solid #cbd5e1;color:#1e293b">
+                        🏨 SECTION 2: CONFIRMED HOTEL ORDERS (PENDING DELIVERY &amp; SUPPLY)
+                    </div>
                     <div class="table-wrap">
                         <table id="hotelOrdersTable">
                             <thead>
                                 <tr>
                                     <th>Order #</th>
-                                    <th>Hotel</th>
+                                    <th>Hotel Name</th>
                                     <th>Date</th>
                                     <th>Status</th>
-                                    <th>Items / Needed</th>
-                                    <th>Actions</th>
+                                    <th>Items Status</th>
+                                    <th style="text-align:right">Ordered Qty</th>
+                                    <th style="text-align:right">Still Needed</th>
+                                    <th class="print-only">Pending Items Breakdown (Still Not Delivered)</th>
+                                    <th class="no-print">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                             <?php if ($hotelOrders): foreach ($hotelOrders as $hOrder): 
                                 $orderItemsList = [];
+                                $pendingItemsStrings = [];
                                 foreach (($activeOrderDetails[$hOrder['OrderID']] ?? []) as $detailRow) {
-                                    if ((float)$detailRow['NeededQuantity'] > 0.0001) {
+                                    $neededQty = (float)$detailRow['NeededQuantity'];
+                                    if ($neededQty > 0.0001) {
                                         $orderItemsList[] = [
                                             'id' => (int)$detailRow['ItemID'],
                                             'name' => $detailRow['ItemName'],
-                                            'qty' => (float)$detailRow['NeededQuantity']
+                                            'qty' => $neededQty
                                         ];
+                                        $pendingItemsStrings[] = e($detailRow['ItemName']) . ': ' . number_format($neededQty, 2) . ' ' . e($detailRow['UnitSymbol']);
                                     }
                                 }
                                 $orderItemsJson = htmlspecialchars(json_encode($orderItemsList), ENT_QUOTES, 'UTF-8');
@@ -1189,7 +1405,7 @@ td.name{white-space:normal;min-width:140px}
                                 $totalCount = (int)$hOrder['TotalItemCount'];
                                 $isOrderComplete = $remainingCount === 0 || (float)$hOrder['TotalNeededQty'] <= 0.0001;
                             ?>
-                                <tr class="order-main-row" style="<?= $isOrderComplete ? 'opacity:0.75;background:#fbfcfd' : '' ?>">
+                                <tr class="order-main-row <?= $isOrderComplete ? 'order-fulfilled' : 'order-pending' ?>" style="<?= $isOrderComplete ? 'opacity:0.75;background:#fbfcfd' : '' ?>">
                                     <td><strong>#<?= (int)$hOrder['OrderID'] ?></strong></td>
                                     <td class="name"><strong><?= e($hOrder['HotelName']) ?></strong></td>
                                     <td><?= date('Y-m-d', strtotime($hOrder['OrderDate'])) ?></td>
@@ -1200,13 +1416,30 @@ td.name{white-space:normal;min-width:140px}
                                     </td>
                                     <td>
                                         <?php if (!$isOrderComplete): ?>
-                                            <div><strong style="color:#e11d48"><?= $remainingCount ?> item(s) remaining</strong></div>
-                                            <span class="muted" style="font-size:11px">of <?= $totalCount ?> items (<?= number_format((float)$hOrder['TotalNeededQty'], 3) ?> needed)</span>
+                                            <div><strong style="color:#e11d48"><?= $remainingCount ?> item(s) pending</strong></div>
+                                            <span class="muted" style="font-size:11px">of <?= $totalCount ?> items</span>
                                         <?php else: ?>
-                                            <span class="pill" style="background:#e8f8ef;color:#16a34a;font-size:11px">✓ All <?= $totalCount ?> Items Delivered</span>
+                                            <span class="pill" style="background:#e8f8ef;color:#16a34a;font-size:10px">✓ Fully Delivered</span>
                                         <?php endif; ?>
                                     </td>
-                                    <td>
+                                    <td style="text-align:right">
+                                        <span><?= number_format((float)$hOrder['TotalOrderedQty'], 2) ?></span>
+                                    </td>
+                                    <td style="text-align:right">
+                                        <?php if (!$isOrderComplete): ?>
+                                            <strong style="color:#e11d48"><?= number_format((float)$hOrder['TotalNeededQty'], 2) ?></strong>
+                                        <?php else: ?>
+                                            <span class="muted">0.00</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="print-only" style="font-size:10px;white-space:normal;max-width:250px">
+                                        <?php if ($pendingItemsStrings): ?>
+                                            <span style="color:#b91c1c;font-weight:600"><?= implode('; ', $pendingItemsStrings) ?></span>
+                                        <?php else: ?>
+                                            <span style="color:#16a34a">✓ All items delivered</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="no-print">
                                         <div class="actions">
                                             <button type="button" class="btn secondary btn-toggle-order-items" data-target="order-items-<?= (int)$hOrder['OrderID'] ?>" style="padding:5px 8px;font-size:11px">
                                                 ▼ Items
@@ -1222,9 +1455,9 @@ td.name{white-space:normal;min-width:140px}
                                         </div>
                                     </td>
                                 </tr>
-                                <!-- Collapsible item breakdown for this order -->
-                                <tr id="order-items-<?= (int)$hOrder['OrderID'] ?>" class="order-items-dropdown" style="display:none;background:#f8fafc">
-                                    <td colspan="6" style="padding:12px 16px">
+                                <!-- Collapsible item breakdown for this order on screen -->
+                                <tr id="order-items-<?= (int)$hOrder['OrderID'] ?>" class="order-items-dropdown no-print" style="display:none;background:#f8fafc">
+                                    <td colspan="7" style="padding:12px 16px">
                                         <div style="font-weight:600;font-size:12px;margin-bottom:8px;color:#334155">
                                             Items for Order #<?= (int)$hOrder['OrderID'] ?> (<?= e($hOrder['HotelName']) ?>):
                                         </div>
@@ -1263,16 +1496,44 @@ td.name{white-space:normal;min-width:140px}
                                     </td>
                                 </tr>
                             <?php endforeach; else: ?>
-                                <tr><td colspan="6" class="empty">No confirmed hotel orders found.</td></tr>
+                                <tr><td colspan="7" class="empty">No confirmed hotel orders found.</td></tr>
                             <?php endif; ?>
                             </tbody>
+                            <tfoot>
+                                <tr style="background:#f8fafc;font-weight:700;border-top:2px solid #cbd5e1">
+                                    <td colspan="4"><strong>TOTALS (<?= count($hotelOrders) ?> orders)</strong></td>
+                                    <td><span class="pill status-pill-confirmed"><?= $activeOrdersPendingCount ?> pending delivery</span></td>
+                                    <td style="text-align:right"><strong><?= number_format($sumHotelOrdersOrderedQty, 2) ?></strong></td>
+                                    <td style="text-align:right"><strong style="color:#e11d48;font-size:13px"><?= number_format($sumHotelOrdersNeededQty, 2) ?></strong></td>
+                                    <td class="print-only"></td>
+                                    <td class="no-print"></td>
+                                </tr>
+                            </tfoot>
                         </table>
+                    </div>
+                </div>
+
+                <!-- PRINT ONLY SIGN-OFF FOOTER -->
+                <div class="print-only demand-print-footer" style="margin-top:35px;padding-top:15px;border-top:1px dashed #94a3b8;page-break-inside:avoid">
+                    <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:20px;font-size:11px;color:#334155">
+                        <div>
+                            <div style="margin-bottom:35px"><strong>Prepared By:</strong></div>
+                            <div style="border-top:1px solid #64748b;padding-top:4px">Signature / Date</div>
+                        </div>
+                        <div>
+                            <div style="margin-bottom:35px"><strong>Market Purchasing Officer:</strong></div>
+                            <div style="border-top:1px solid #64748b;padding-top:4px">Signature / Date</div>
+                        </div>
+                        <div>
+                            <div style="margin-bottom:35px"><strong>Store Receiving &amp; Verification:</strong></div>
+                            <div style="border-top:1px solid #64748b;padding-top:4px">Signature / Date</div>
+                        </div>
                     </div>
                 </div>
             </section>
 
             <!-- PANEL 2: PURCHASE HISTORY -->
-            <section class="panel">
+            <section class="panel no-print" id="purchaseHistoryPanel">
                 <h2>Purchase History</h2>
 
                 <form method="get" action="purchases.php" class="filters">
@@ -1561,6 +1822,46 @@ td.name{white-space:normal;min-width:140px}
 
             alert(`Added ${items.length} item(s) from this order into the purchase form.`);
         });
+    });
+
+    /* --- PRINT HOTEL ORDER REQUIREMENTS --- */
+    window.executeDemandPrint = function (mode) {
+        const panel = document.getElementById('hotelDemandPanel');
+        if (!panel) return;
+
+        panel.classList.remove('print-mode-all', 'print-mode-items-only', 'print-mode-orders-only');
+        if (mode === 'items') {
+            panel.classList.add('print-mode-items-only');
+        } else if (mode === 'orders') {
+            panel.classList.add('print-mode-orders-only');
+        } else {
+            panel.classList.add('print-mode-all');
+        }
+
+        const menu = document.getElementById('printDropdownMenu');
+        if (menu) menu.style.display = 'none';
+
+        setTimeout(function () {
+            window.print();
+        }, 50);
+    };
+
+    window.togglePrintMenu = function (event) {
+        if (event) event.stopPropagation();
+        const menu = document.getElementById('printDropdownMenu');
+        if (menu) {
+            menu.style.display = (menu.style.display === 'none' || menu.style.display === '') ? 'block' : 'none';
+        }
+    };
+
+    document.addEventListener('click', function (e) {
+        const menu = document.getElementById('printDropdownMenu');
+        const toggleBtn = document.getElementById('btnPrintMenuToggle');
+        if (menu && menu.style.display === 'block') {
+            if (!toggleBtn || !toggleBtn.contains(e.target)) {
+                menu.style.display = 'none';
+            }
+        }
     });
 })();
 </script>
