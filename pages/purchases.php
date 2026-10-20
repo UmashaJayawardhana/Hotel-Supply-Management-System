@@ -114,7 +114,7 @@ function validatePurchaseItems(PDO $pdo, array $rows): void
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
 
     $stmt = $pdo->prepare("
-        SELECT i.ItemID
+        SELECT i.ItemID, i.ItemName, u.UnitSymbol
         FROM item i
         INNER JOIN unit u ON u.UnitID = i.UnitID
         INNER JOIN item_category c ON c.CategoryID = i.CategoryID
@@ -126,12 +126,27 @@ function validatePurchaseItems(PDO $pdo, array $rows): void
 
     $stmt->execute($ids);
 
-    $validIds = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    $itemsMap = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
+        $itemsMap[(int)$item['ItemID']] = $item;
+    }
 
-    if (count($validIds) !== count($ids)) {
+    if (count($itemsMap) !== count($ids)) {
         throw new RuntimeException(
             'One or more selected items, units, or categories are inactive.'
         );
+    }
+
+    foreach ($rows as $row) {
+        $item = $itemsMap[(int)$row['ItemID']] ?? null;
+        if ($item && strtoupper((string)($item['UnitSymbol'] ?? '')) === 'NOS') {
+            $qty = (float)$row['Quantity'];
+            if (abs($qty - round($qty)) > 0.00001 || (int)$qty <= 0) {
+                throw new RuntimeException(
+                    "Item '{$item['ItemName']}' is measured in NOS (Number of Items) and its quantity must be a positive whole number (integer)."
+                );
+            }
+        }
     }
 }
 
@@ -1104,7 +1119,10 @@ td.name{white-space:normal;min-width:140px}
                                 <select name="item_id[]" required>
                                     <option value="">Select item</option>
                                     <?php foreach ($items as $item): ?>
-                                        <option value="<?= (int)$item['ItemID'] ?>" <?= (string)$detail['ItemID'] === (string)$item['ItemID'] ? 'selected' : '' ?>>
+                                        <option value="<?= (int)$item['ItemID'] ?>"
+                                                data-unit="<?= e($item['UnitSymbol']) ?>"
+                                                data-name="<?= e($item['ItemName']) ?>"
+                                                <?= (string)$detail['ItemID'] === (string)$item['ItemID'] ? 'selected' : '' ?>>
                                             <?= e($item['ItemCode']) ?> - <?= e($item['ItemName']) ?> (<?= e($item['UnitSymbol']) ?>)
                                         </option>
                                     <?php endforeach; ?>
@@ -1626,8 +1644,30 @@ td.name{white-space:normal;min-width:140px}
         });
     }
 
+    function syncUnitSteps() {
+        rows.querySelectorAll('.purchase-line').forEach(function (row) {
+            const select = row.querySelector('select[name="item_id[]"]');
+            const qtyInput = row.querySelector('input[name="quantity[]"]');
+            if (!select || !qtyInput) return;
+            const opt = select.selectedOptions[0];
+            const unit = opt ? (opt.getAttribute('data-unit') || '').toUpperCase() : '';
+            if (unit === 'NOS') {
+                qtyInput.step = '1';
+                qtyInput.min = '1';
+                qtyInput.placeholder = '0';
+            } else {
+                qtyInput.step = '0.001';
+                qtyInput.min = '0.001';
+                qtyInput.placeholder = '0.000';
+            }
+        });
+    }
+
     rows.addEventListener('input', recalculate);
-    rows.addEventListener('change', recalculate);
+    rows.addEventListener('change', function () {
+        syncUnitSteps();
+        recalculate();
+    });
 
     rows.addEventListener('click', function (event) {
         const button = event.target.closest('.remove-row');
@@ -1658,9 +1698,30 @@ td.name{white-space:normal;min-width:140px}
         if (duplicate) {
             event.preventDefault();
             alert('An item can only appear once in a purchase. Combine its quantity into one row.');
+            return;
+        }
+
+        let nosError = false;
+        rows.querySelectorAll('.purchase-line').forEach(function (row) {
+            const select = row.querySelector('select[name="item_id[]"]');
+            const qtyInput = row.querySelector('input[name="quantity[]"]');
+            if (!select || !qtyInput) return;
+            const opt = select.selectedOptions[0];
+            const unit = opt ? (opt.getAttribute('data-unit') || '').toUpperCase() : '';
+            const itemName = opt ? (opt.getAttribute('data-name') || opt.textContent.trim()) : 'Item';
+            const val = parseFloat(qtyInput.value);
+            if (unit === 'NOS' && (!Number.isInteger(val) || val <= 0)) {
+                nosError = itemName;
+            }
+        });
+
+        if (nosError) {
+            event.preventDefault();
+            alert("Quantity for '" + nosError + "' must be a positive whole number (integer) because it is measured in NOS.");
         }
     });
 
+    syncUnitSteps();
     recalculate();
 
     /* --- DEMAND TABS SWITCHING --- */

@@ -326,9 +326,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Fetch all detail rows belonging to the selected order.
                 $detailStmt = $pdo->prepare(
-                    'SELECT OrderDetailID, ItemID, OrderedQuantity
-                     FROM hotel_order_detail
-                     WHERE OrderID = ?'
+                    'SELECT od.OrderDetailID, od.ItemID, od.OrderedQuantity, i.ItemName, u.UnitSymbol
+                     FROM hotel_order_detail od
+                     INNER JOIN item i ON i.ItemID = od.ItemID
+                     LEFT JOIN unit u ON u.UnitID = i.UnitID
+                     WHERE od.OrderID = ?'
                 );
                 $detailStmt->execute([$orderId]);
 
@@ -352,6 +354,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     $detail = $validDetails[$detailId];
+
+                    if (strtoupper((string)($detail['UnitSymbol'] ?? '')) === 'NOS') {
+                        $qty = (float)$row['quantity'];
+                        if (abs($qty - round($qty)) > 0.00001 || (int)$qty <= 0) {
+                            throw new RuntimeException(
+                                "Item '{$detail['ItemName']}' is measured in NOS (Number of Items) and must have a positive whole number (integer) quantity."
+                            );
+                        }
+                    }
 
                     $price = getDeliveryPrice($pdo, (int)$detail['ItemID'], $deliveryDate);
 
@@ -1056,13 +1067,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                                             <td><?= e(number_format((float)$line['SuppliedQuantity'], 3)) ?> <?= e($line['UnitSymbol']) ?></td>
                                             <td><strong><?= e(number_format($remaining, 3)) ?> <?= e($line['UnitSymbol']) ?></strong></td>
                                             <td>
+                                                <?php $isNos = strtoupper((string)($line['UnitSymbol'] ?? '')) === 'NOS'; ?>
                                                 <input type="hidden" name="order_detail_id[]" value="<?= $detailId ?>">
                                                 <input type="number"
                                                        name="supplied_quantity[]"
                                                        min="0"
-                                                       step="0.001"
-                                                       value="<?= e($savedQty) ?>"
-                                                       placeholder="0.000">
+                                                       step="<?= $isNos ? '1' : '0.001' ?>"
+                                                       data-unit="<?= e($line['UnitSymbol']) ?>"
+                                                       data-item-name="<?= e($line['ItemName']) ?>"
+                                                       value="<?= e($savedQty !== '' ? ($isNos ? (int)$savedQty : $savedQty) : '') ?>"
+                                                       placeholder="<?= $isNos ? '0' : '0.000' ?>">
                                             </td>
                                             <td>
                                                 <input type="hidden" name="item_notes[]" value="">
@@ -1204,5 +1218,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         </section>
     </main>
 </div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const deliveryForm = document.getElementById('deliveryForm');
+    if (!deliveryForm) return;
+
+    deliveryForm.addEventListener('submit', function (e) {
+        let invalidNos = false;
+        deliveryForm.querySelectorAll('input[name="supplied_quantity[]"]').forEach(function (input) {
+            const val = input.value.trim();
+            const unit = (input.getAttribute('data-unit') || '').toUpperCase();
+            if (unit === 'NOS' && val !== '') {
+                const num = parseFloat(val);
+                if (num > 0 && (!Number.isInteger(num) || num <= 0)) {
+                    invalidNos = input.getAttribute('data-item-name') || 'Item';
+                }
+            }
+        });
+        if (invalidNos) {
+            e.preventDefault();
+            alert("Quantity for '" + invalidNos + "' must be a positive whole number (integer) because it is measured in NOS.");
+        }
+    });
+});
+</script>
 </body>
 </html>

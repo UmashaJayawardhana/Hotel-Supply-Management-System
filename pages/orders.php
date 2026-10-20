@@ -182,18 +182,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = 'The selected hotel is unavailable or inactive.';
             }
 
-            // Ensure all selected items are valid and active.
+            // Ensure all selected items are valid, active, and NOS items have positive whole number quantities.
             if ($rows) {
                 $checkItem = $pdo->prepare(
-                    'SELECT ItemID FROM item WHERE ItemID = ? AND IsActive = 1'
+                    'SELECT i.ItemID, i.ItemName, u.UnitSymbol
+                     FROM item i
+                     LEFT JOIN unit u ON u.UnitID = i.UnitID
+                     WHERE i.ItemID = ? AND i.IsActive = 1'
                 );
 
                 foreach ($rows as $row) {
                     $checkItem->execute([$row['item_id']]);
+                    $itemInfo = $checkItem->fetch(PDO::FETCH_ASSOC);
 
-                    if (!$checkItem->fetchColumn()) {
+                    if (!$itemInfo) {
                         $errors[] = 'One or more selected items are unavailable or inactive.';
                         break;
+                    }
+
+                    if (strtoupper((string)($itemInfo['UnitSymbol'] ?? '')) === 'NOS') {
+                        $qty = (float)$row['quantity'];
+                        if (abs($qty - round($qty)) > 0.00001 || (int)$qty <= 0) {
+                            $errors[] = "Item '{$itemInfo['ItemName']}' is measured in NOS (Number of Items) and must have a positive whole number (integer) quantity.";
+                        }
                     }
                 }
             }
@@ -1042,6 +1053,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                                             <option value="">Select item</option>
                                             <?php foreach ($items as $item): ?>
                                                 <option value="<?= (int)$item['ItemID'] ?>"
+                                                    data-unit="<?= e($item['UnitSymbol']) ?>"
+                                                    data-name="<?= e($item['ItemName']) ?>"
                                                     <?= (string)$detail['ItemID'] === (string)$item['ItemID'] ? 'selected' : '' ?>>
                                                     <?= e($item['ItemCode'] . ' — ' . $item['ItemName'] . ' (' . $item['UnitSymbol'] . ')') ?>
                                                 </option>
@@ -1222,8 +1235,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 (function () {
     const body = document.getElementById('orderItemsBody');
     const addButton = document.getElementById('addItemRow');
+    const form = document.getElementById('hotelOrderForm');
 
-    if (!body || !addButton) return;
+    if (!body) return;
+
+    function syncUnitSteps() {
+        body.querySelectorAll('tr').forEach(function (row) {
+            const select = row.querySelector('select[name="item_id[]"]');
+            const qtyInput = row.querySelector('input[name="ordered_quantity[]"]');
+            if (!select || !qtyInput) return;
+            const opt = select.selectedOptions[0];
+            const unit = opt ? (opt.getAttribute('data-unit') || '').toUpperCase() : '';
+            if (unit === 'NOS') {
+                qtyInput.step = '1';
+                qtyInput.min = '1';
+                qtyInput.placeholder = '0';
+            } else {
+                qtyInput.step = '0.001';
+                qtyInput.min = '0.001';
+                qtyInput.placeholder = '0.000';
+            }
+        });
+    }
 
     function addRow() {
         const firstRow = body.querySelector('tr');
@@ -1233,9 +1266,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         newRow.querySelectorAll('select').forEach(select => select.selectedIndex = 0);
         newRow.querySelectorAll('input').forEach(input => input.value = '');
         body.appendChild(newRow);
+        syncUnitSteps();
     }
 
-    addButton.addEventListener('click', addRow);
+    if (addButton) {
+        addButton.addEventListener('click', addRow);
+    }
+
+    body.addEventListener('change', function (e) {
+        if (e.target && e.target.matches('select[name="item_id[]"]')) {
+            syncUnitSteps();
+        }
+    });
 
     body.addEventListener('click', function (event) {
         const button = event.target.closest('.remove-item');
@@ -1246,11 +1288,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         if (rows.length === 1) {
             rows[0].querySelectorAll('select').forEach(select => select.selectedIndex = 0);
             rows[0].querySelectorAll('input').forEach(input => input.value = '');
+            syncUnitSteps();
             return;
         }
 
         button.closest('tr').remove();
     });
+
+    if (form) {
+        form.addEventListener('submit', function (e) {
+            let invalidNos = false;
+            body.querySelectorAll('tr').forEach(function (row) {
+                const select = row.querySelector('select[name="item_id[]"]');
+                const qtyInput = row.querySelector('input[name="ordered_quantity[]"]');
+                if (!select || !qtyInput) return;
+                const opt = select.selectedOptions[0];
+                const unit = opt ? (opt.getAttribute('data-unit') || '').toUpperCase() : '';
+                const itemName = opt ? (opt.getAttribute('data-name') || opt.textContent.trim()) : 'Item';
+                const val = parseFloat(qtyInput.value);
+                if (unit === 'NOS' && (!Number.isInteger(val) || val <= 0)) {
+                    invalidNos = itemName;
+                }
+            });
+            if (invalidNos) {
+                e.preventDefault();
+                alert("Quantity for '" + invalidNos + "' must be a positive whole number (integer) because it is measured in NOS.");
+            }
+        });
+    }
+
+    syncUnitSteps();
 })();
 </script>
 </body>
