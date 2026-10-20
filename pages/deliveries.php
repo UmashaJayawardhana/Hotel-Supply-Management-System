@@ -341,23 +341,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('This hotel order has no order items.');
                 }
 
-                // Sum quantities from completed deliveries, excluding the draft being edited.
-                $completedStmt = $pdo->prepare(
-                    "SELECT dd.OrderDetailID, SUM(dd.SuppliedQuantity) AS SuppliedQty
-                     FROM delivery_detail dd
-                     INNER JOIN delivery d ON d.DeliveryID = dd.DeliveryID
-                     WHERE d.Status = 'Completed'
-                       AND d.OrderID = ?
-                     GROUP BY dd.OrderDetailID"
-                );
-                $completedStmt->execute([$orderId]);
-
-                $completedQty = [];
-                foreach ($completedStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                    $completedQty[(int)$row['OrderDetailID']] = (float)$row['SuppliedQty'];
-                }
-
-                // Validate submitted detail rows, remaining quantities and date-specific prices.
+                // Validate submitted detail rows and date-specific prices.
                 $preparedRows = [];
 
                 foreach ($submittedRows as $row) {
@@ -368,15 +352,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     $detail = $validDetails[$detailId];
-                    $orderedQty = (float)$detail['OrderedQuantity'];
-                    $alreadySupplied = $completedQty[$detailId] ?? 0.0;
-                    $remainingQty = $orderedQty - $alreadySupplied;
-
-                    if ($row['quantity'] > $remainingQty + 0.000001) {
-                        throw new RuntimeException(
-                            'A supplied quantity exceeds the remaining ordered quantity. Please refresh and check the order.'
-                        );
-                    }
 
                     $price = getDeliveryPrice($pdo, (int)$detail['ItemID'], $deliveryDate);
 
@@ -448,38 +423,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 if ($status === 'Completed') {
-                    /*
-                     * Re-check the order's total supplied quantities including
-                     * the delivery being completed.
-                     */
-                    $checkStmt = $pdo->prepare(
-                        "SELECT dd.OrderDetailID, SUM(dd.SuppliedQuantity) AS SuppliedQty
-                         FROM delivery_detail dd
-                         INNER JOIN delivery d ON d.DeliveryID = dd.DeliveryID
-                         WHERE d.OrderID = ?
-                           AND d.Status = 'Completed'
-                           AND d.DeliveryID <> ?
-                         GROUP BY dd.OrderDetailID"
-                    );
-                    $checkStmt->execute([$orderId, $deliveryId]);
-
-                    $otherCompleted = [];
-                    foreach ($checkStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                        $otherCompleted[(int)$row['OrderDetailID']] = (float)$row['SuppliedQty'];
-                    }
-
-                    foreach ($preparedRows as $row) {
-                        $detailId = $row['order_detail_id'];
-                        $orderedQty = (float)$validDetails[$detailId]['OrderedQuantity'];
-                        $previousQty = $otherCompleted[$detailId] ?? 0.0;
-
-                        if ($previousQty + $row['quantity'] > $orderedQty + 0.000001) {
-                            throw new RuntimeException(
-                                'Completing this delivery would exceed the ordered quantity. Review the order and other deliveries.'
-                            );
-                        }
-                    }
-
                     $completeStmt = $pdo->prepare(
                         "UPDATE delivery SET Status = 'Completed' WHERE DeliveryID = ?"
                     );
@@ -599,7 +542,8 @@ $eligibleOrdersSql = "
            (SELECT d.DeliveryID FROM delivery d WHERE d.OrderID = o.OrderID AND d.Status = 'Draft' ORDER BY d.DeliveryID DESC LIMIT 1) AS DraftDeliveryID
     FROM hotel_order o
     INNER JOIN hotel h ON h.HotelID = o.HotelID
-    WHERE o.Status IN ('Confirmed', 'Partially Delivered')
+    WHERE (o.Status IN ('Confirmed', 'Partially Delivered', 'Delivered')
+           OR EXISTS (SELECT 1 FROM delivery d WHERE d.OrderID = o.OrderID AND d.Status = 'Draft'))
       AND EXISTS (
           SELECT 1
           FROM hotel_order_detail od
@@ -1051,9 +995,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                     ?>
 
                     <?php if (!$hasRemaining && empty($formDelivery['DeliveryID'])): ?>
-                        <div class="alert alert-success">All ordered quantities have already been supplied through completed deliveries.</div>
-                    <?php else: ?>
-                        <form method="POST" action="deliveries.php" id="deliveryForm">
+                        <div class="alert alert-info" style="margin-bottom:16px">All originally ordered quantities have already been supplied through completed deliveries. You can still enter quantities below to deliver additional items.</div>
+                    <?php endif; ?>
+                    <form method="POST" action="deliveries.php" id="deliveryForm">
                             <input type="hidden" name="csrf_token" value="<?= e($_SESSION['csrf_token']) ?>">
                             <input type="hidden" name="action" value="save">
                             <input type="hidden" name="delivery_id" value="<?= (int)$formDelivery['DeliveryID'] ?>">
@@ -1116,11 +1060,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                                                 <input type="number"
                                                        name="supplied_quantity[]"
                                                        min="0"
-                                                       max="<?= e(number_format($remaining, 3, '.', '')) ?>"
                                                        step="0.001"
                                                        value="<?= e($savedQty) ?>"
-                                                       placeholder="0.000"
-                                                       <?= $remaining <= 0 && $savedQty === '' ? 'disabled' : '' ?>>
+                                                       placeholder="0.000">
                                             </td>
                                             <td>
                                                 <input type="hidden" name="item_notes[]" value="">
@@ -1133,7 +1075,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                             </div>
 
                             <p class="help" style="margin-top:10px">
-                                Enter the quantity to deliver now. Leave blank or enter 0 for items not being delivered. As long as at least one item is being delivered, this can be saved as a draft or completed.
+                                Enter the quantity to deliver now. Leave blank or enter 0 for items not being delivered. Quantities can be less than or more than the ordered values. As long as at least one item is being delivered, this can be saved as a draft or completed.
                             </p>
 
                             <div class="form-actions">
@@ -1146,7 +1088,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                                 </button>
                             </div>
                         </form>
-                    <?php endif; ?>
                 <?php endif; ?>
             <?php endif; ?>
         </section>
