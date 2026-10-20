@@ -328,6 +328,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     /*
     |--------------------------------------------------------------------------
+    | Confirm order (ready for procurement & delivery)
+    |--------------------------------------------------------------------------
+    */
+    if ($action === 'confirm') {
+        $orderId = (int)($_POST['order_id'] ?? 0);
+
+        try {
+            $pdo->beginTransaction();
+
+            $stmt = $pdo->prepare(
+                'SELECT OrderID, Status
+                 FROM hotel_order
+                 WHERE OrderID = ?
+                 FOR UPDATE'
+            );
+            $stmt->execute([$orderId]);
+            $order = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$order) {
+                throw new RuntimeException('Order not found.');
+            }
+
+            if ($order['Status'] !== 'Received') {
+                throw new RuntimeException('Only orders awaiting confirmation ("Received") can be confirmed.');
+            }
+
+            $confirmStmt = $pdo->prepare(
+                'UPDATE hotel_order SET Status = "Confirmed" WHERE OrderID = ?'
+            );
+            $confirmStmt->execute([$orderId]);
+
+            $pdo->commit();
+            orderFlash('success', "Order #{$orderId} confirmed successfully. It is now ready for market purchases and deliveries.");
+            orderRedirect($_POST['return_to'] ?? 'orders.php');
+        } catch (Throwable $exception) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            orderFlash('error', $exception instanceof RuntimeException
+                ? $exception->getMessage()
+                : 'The order could not be confirmed.');
+
+            orderRedirect();
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Cancel order
     |--------------------------------------------------------------------------
     */
@@ -814,8 +863,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     </div>
                     <div class="action-buttons">
                         <a class="btn btn-secondary" href="orders.php">← Back to Orders</a>
+                        <?php if ($viewOrder['Status'] === 'Received'): ?>
+                            <form class="inline-form" method="POST" action="orders.php" onsubmit="return confirm('Confirm Order #<?= (int)$viewOrder['OrderID'] ?>? This marks it ready for procurement and delivery.');" style="display:inline">
+                                <input type="hidden" name="csrf_token" value="<?= e($_SESSION['csrf_token']) ?>">
+                                <input type="hidden" name="action" value="confirm">
+                                <input type="hidden" name="order_id" value="<?= (int)$viewOrder['OrderID'] ?>">
+                                <input type="hidden" name="return_to" value="orders.php?view=<?= (int)$viewOrder['OrderID'] ?>">
+                                <button type="submit" class="btn btn-primary">✓ Confirm Order</button>
+                            </form>
+                        <?php endif; ?>
+                        <?php if (in_array($viewOrder['Status'], ['Confirmed', 'Partially Delivered'], true)): ?>
+                            <a class="btn btn-primary" href="deliveries.php?order_id=<?= (int)$viewOrder['OrderID'] ?>">🚚 Create Delivery</a>
+                        <?php endif; ?>
                         <?php if (!in_array($viewOrder['Status'], ['Cancelled', 'Delivered', 'Partially Delivered'], true)): ?>
-                            <a class="btn btn-primary" href="orders.php?edit=<?= (int)$viewOrder['OrderID'] ?>">Edit Order</a>
+                            <a class="btn btn-secondary" href="orders.php?edit=<?= (int)$viewOrder['OrderID'] ?>">Edit Order</a>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -1112,6 +1173,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                             <td>
                                 <div class="action-buttons">
                                     <a class="btn btn-secondary btn-small" href="orders.php?view=<?= (int)$order['OrderID'] ?>">View</a>
+                                    <?php if ($order['Status'] === 'Received'): ?>
+                                        <form class="inline-form" method="POST" action="orders.php"
+                                              onsubmit="return confirm('Confirm Order #<?= (int)$order['OrderID'] ?>? This marks it ready for procurement and delivery.');">
+                                            <input type="hidden" name="csrf_token" value="<?= e($_SESSION['csrf_token']) ?>">
+                                            <input type="hidden" name="action" value="confirm">
+                                            <input type="hidden" name="order_id" value="<?= (int)$order['OrderID'] ?>">
+                                            <button type="submit" class="btn btn-primary btn-small">✓ Confirm</button>
+                                        </form>
+                                    <?php endif; ?>
+                                    <?php if (in_array($order['Status'], ['Confirmed', 'Partially Delivered'], true)): ?>
+                                        <a class="btn btn-primary btn-small" href="deliveries.php?order_id=<?= (int)$order['OrderID'] ?>">🚚 Deliver</a>
+                                    <?php endif; ?>
                                     <?php
                                     $deliveryCheck = $pdo->prepare(
                                         'SELECT COUNT(*) FROM delivery WHERE OrderID = ? AND Status <> "Cancelled"'

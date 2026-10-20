@@ -289,6 +289,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('A cancelled hotel order cannot receive a delivery.');
                 }
 
+                if ($order['Status'] === 'Received') {
+                    throw new RuntimeException('Orders with status "Received" must be confirmed before creating a delivery.');
+                }
+
                 $existingDelivery = null;
 
                 if ($deliveryId > 0) {
@@ -586,18 +590,19 @@ $items = $pdo->query(
      ORDER BY i.ItemName'
 )->fetchAll(PDO::FETCH_ASSOC);
 
-$eligibleOrders = $pdo->query(
-    "SELECT o.OrderID, o.OrderDate, o.Status, h.HotelName
-     FROM hotel_order o
-     INNER JOIN hotel h ON h.HotelID = o.HotelID
-     WHERE o.Status <> 'Cancelled'
-       AND EXISTS (
-           SELECT 1
-           FROM hotel_order_detail od
-           WHERE od.OrderID = o.OrderID
-       )
-     ORDER BY o.OrderDate DESC, o.OrderID DESC"
-)->fetchAll(PDO::FETCH_ASSOC);
+$eligibleOrdersSql = "
+    SELECT o.OrderID, o.OrderDate, o.Status, h.HotelName
+    FROM hotel_order o
+    INNER JOIN hotel h ON h.HotelID = o.HotelID
+    WHERE o.Status IN ('Confirmed', 'Partially Delivered')
+      AND EXISTS (
+          SELECT 1
+          FROM hotel_order_detail od
+          WHERE od.OrderID = o.OrderID
+      )
+    ORDER BY o.OrderDate DESC, o.OrderID DESC
+";
+$eligibleOrders = $pdo->query($eligibleOrdersSql)->fetchAll(PDO::FETCH_ASSOC);
 
 /*
 |--------------------------------------------------------------------------
@@ -659,7 +664,14 @@ if ($selectedOrderId > 0) {
     $selectedOrder = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($selectedOrder) {
-        $lineStmt = $pdo->prepare(
+        if ($selectedOrder['Status'] === 'Received') {
+            $errors[] = "Order #{$selectedOrderId} is awaiting confirmation ('Received'). Orders must be Confirmed before creating a delivery.";
+            $selectedOrder = null;
+        } elseif ($selectedOrder['Status'] === 'Cancelled') {
+            $errors[] = "Order #{$selectedOrderId} is Cancelled and cannot receive a delivery.";
+            $selectedOrder = null;
+        } else {
+            $lineStmt = $pdo->prepare(
             "SELECT od.OrderDetailID, od.ItemID, od.OrderedQuantity, od.ItemNotes,
                     i.ItemCode, i.ItemName, u.UnitSymbol,
                     COALESCE((
@@ -677,6 +689,7 @@ if ($selectedOrderId > 0) {
         );
         $lineStmt->execute([$selectedOrderId]);
         $orderLines = $lineStmt->fetchAll(PDO::FETCH_ASSOC);
+        }
     }
 }
 
@@ -940,7 +953,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
             <div class="panel-heading">
                 <div>
                     <h2><?= !empty($formDelivery['DeliveryID']) ? 'Edit Draft Delivery #' . (int)$formDelivery['DeliveryID'] : 'Create a Delivery' ?></h2>
-                    <p class="muted" style="margin:6px 0 0">Choose an order to see the remaining quantities available for delivery.</p>
+                    <p class="muted" style="margin:6px 0 0">Choose a confirmed hotel order to see the remaining quantities available for delivery (orders must be Confirmed before delivery).</p>
                 </div>
                 <?php if (!empty($formDelivery['DeliveryID'])): ?>
                     <a class="btn btn-secondary" href="deliveries.php">Cancel Editing</a>
@@ -948,14 +961,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
             </div>
 
             <?php if (!$eligibleOrders): ?>
-                <div class="alert alert-error">No eligible hotel orders found. Record an order with at least one item first.</div>
+                <div class="alert alert-error">No eligible confirmed hotel orders found. Orders awaiting confirmation ('Received') must be Confirmed first.</div>
             <?php else: ?>
                 <?php if (!$selectedOrder): ?>
                     <form method="GET" action="deliveries.php" class="form-grid" style="margin-bottom:20px">
                         <div class="field">
                             <label for="order_id">Hotel Order *</label>
                             <select name="order_id" id="order_id" required>
-                                <option value="">Select a hotel order</option>
+                                <option value="">Select a confirmed hotel order</option>
                                 <?php foreach ($eligibleOrders as $order): ?>
                                     <option value="<?= (int)$order['OrderID'] ?>">
                                         #<?= (int)$order['OrderID'] ?> — <?= e($order['HotelName']) ?>
