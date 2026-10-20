@@ -500,7 +500,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         : 'Delivery draft saved successfully.'
                 );
 
-                deliveryRedirect();
+                deliveryRedirect($status === 'Completed' ? 'deliveries.php' : 'deliveries.php?edit=' . $deliveryId);
             }
         } catch (Throwable $exception) {
             if ($pdo->inTransaction()) {
@@ -595,7 +595,8 @@ $items = $pdo->query(
 )->fetchAll(PDO::FETCH_ASSOC);
 
 $eligibleOrdersSql = "
-    SELECT o.OrderID, o.OrderDate, o.Status, h.HotelName
+    SELECT o.OrderID, o.OrderDate, o.Status, h.HotelName,
+           (SELECT d.DeliveryID FROM delivery d WHERE d.OrderID = o.OrderID AND d.Status = 'Draft' ORDER BY d.DeliveryID DESC LIMIT 1) AS DraftDeliveryID
     FROM hotel_order o
     INNER JOIN hotel h ON h.HotelID = o.HotelID
     WHERE o.Status IN ('Confirmed', 'Partially Delivered')
@@ -649,6 +650,35 @@ $selectedOrderId = (int)($_GET['order_id'] ?? 0);
 
 if ($editDelivery) {
     $selectedOrderId = (int)$editDelivery['OrderID'];
+}
+
+// Auto-load existing draft delivery if an order was chosen directly or from "Create a Delivery"
+if (!$editDelivery && $selectedOrderId > 0 && empty($_GET['new']) && $_SERVER['REQUEST_METHOD'] !== 'POST') {
+    $draftCheckStmt = $pdo->prepare(
+        "SELECT d.*, o.HotelID, h.HotelName
+         FROM delivery d
+         INNER JOIN hotel_order o ON o.OrderID = d.OrderID
+         INNER JOIN hotel h ON h.HotelID = o.HotelID
+         WHERE d.OrderID = ?
+           AND d.Status = 'Draft'
+         ORDER BY d.DeliveryID DESC
+         LIMIT 1"
+    );
+    $draftCheckStmt->execute([$selectedOrderId]);
+    $existingDraft = $draftCheckStmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($existingDraft) {
+        $editDelivery = $existingDraft;
+        $editId = (int)$existingDraft['DeliveryID'];
+
+        $detailStmt = $pdo->prepare(
+            'SELECT OrderDetailID, SuppliedQuantity, UnitPrice
+             FROM delivery_detail
+             WHERE DeliveryID = ?'
+        );
+        $detailStmt->execute([$editId]);
+        $editDetails = $detailStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
@@ -974,9 +1004,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                             <select name="order_id" id="order_id" required>
                                 <option value="">Select a confirmed hotel order</option>
                                 <?php foreach ($eligibleOrders as $order): ?>
-                                    <option value="<?= (int)$order['OrderID'] ?>">
+                                    <option value="<?= (int)$order['OrderID'] ?>" <?= $selectedOrderId === (int)$order['OrderID'] ? 'selected' : '' ?>>
                                         #<?= (int)$order['OrderID'] ?> — <?= e($order['HotelName']) ?>
-                                        (<?= e($order['OrderDate']) ?>, <?= e($order['Status']) ?>)
+                                        (<?= e($order['OrderDate']) ?>, <?= e($order['Status']) ?>)<?= !empty($order['DraftDeliveryID']) ? ' — 📝 Draft #' . (int)$order['DraftDeliveryID'] : '' ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -993,9 +1023,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                             Order date: <?= e($selectedOrder['OrderDate']) ?>
                             &nbsp; | &nbsp; Order status: <?= e($selectedOrder['Status']) ?>
                         </div>
-                        <div style="margin-top:10px">
+                        <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                             <a href="deliveries.php" class="btn btn-secondary btn-small">Choose Another Order</a>
+                            <?php if (!empty($formDelivery['DeliveryID'])): ?>
+                                <a href="deliveries.php?order_id=<?= (int)$selectedOrder['OrderID'] ?>&new=1" class="btn btn-secondary btn-small" title="Start a fresh delivery instead of continuing this draft">＋ New Delivery Instead</a>
+                            <?php endif; ?>
                         </div>
+                        <?php if (!empty($formDelivery['DeliveryID'])): ?>
+                            <div style="margin-top:12px;padding:9px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;color:#166534;font-size:12px;display:flex;align-items:center;gap:8px">
+                                <span style="font-size:15px">📝</span>
+                                <div>
+                                    <strong>Existing Draft Delivery #<?= (int)$formDelivery['DeliveryID'] ?> loaded.</strong>
+                                    Saved items and quantities have been loaded below into "Deliver Now". You can adjust quantities and click "Update Draft" or "Complete Delivery".
+                                </div>
+                            </div>
+                        <?php endif; ?>
                     </div>
 
                     <?php
@@ -1096,7 +1138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 
                             <div class="form-actions">
                                 <button type="submit" name="status" value="Draft" class="btn btn-secondary">
-                                    Save as Draft
+                                    <?= !empty($formDelivery['DeliveryID']) ? 'Update Draft' : 'Save as Draft' ?>
                                 </button>
                                 <button type="submit" name="status" value="Completed" class="btn btn-primary"
                                         onclick="return confirm('Complete this delivery? The quantities will be recorded and an invoice will be created.');">
