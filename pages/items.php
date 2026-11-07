@@ -2,6 +2,8 @@
 session_start();
 
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/auth.php';
+requireLogin();
 
 /* DOWNLOAD CSV TEMPLATE */
 if (isset($_GET['download_template'])) {
@@ -624,6 +626,164 @@ $isEditing = $editItem !== null;
             .filter-form { grid-template-columns:1fr; }
             .item-panel { padding:15px; }
         }
+
+        /* ===== Searchable Select Dropdown ===== */
+        .searchable-select-wrapper {
+            position: relative;
+            width: 100%;
+        }
+        .searchable-control {
+            position: relative;
+            display: flex;
+            align-items: center;
+            width: 100%;
+        }
+        .searchable-input {
+            width: 100%;
+            padding: 11px 54px 11px 12px;
+            border: 1px solid #dfe4ed;
+            border-radius: 7px;
+            font: inherit;
+            font-size: 13px;
+            background: white;
+            color: #202b43;
+            box-sizing: border-box;
+            cursor: text;
+            transition: border-color .15s ease, outline .15s ease;
+        }
+        .searchable-input:focus {
+            outline: 2px solid #dce2ff;
+            border-color: #6679dc;
+        }
+        .searchable-actions {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .searchable-clear {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            padding: 0;
+            border: none;
+            border-radius: 50%;
+            background: #e2e8f0;
+            color: #64748b;
+            font-size: 14px;
+            cursor: pointer;
+            line-height: 1;
+            transition: background .15s, color .15s;
+        }
+        .searchable-clear:hover {
+            background: #cbd5e1;
+            color: #1e293b;
+        }
+        .searchable-arrow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            padding: 0;
+            border: none;
+            background: none;
+            color: #778198;
+            font-size: 11px;
+            cursor: pointer;
+            transition: transform .2s ease, color .15s;
+        }
+        .searchable-arrow:hover {
+            color: #4658a9;
+        }
+        .searchable-select-wrapper.is-open .searchable-arrow {
+            transform: rotate(180deg);
+        }
+        .searchable-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #dfe4ed;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(32, 43, 67, 0.12);
+            max-height: 220px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+        }
+        .searchable-select-wrapper.is-open .searchable-dropdown {
+            display: block;
+        }
+        .searchable-dropdown::-webkit-scrollbar {
+            width: 6px;
+        }
+        .searchable-dropdown::-webkit-scrollbar-track {
+            background: #f8fafc;
+            border-radius: 4px;
+        }
+        .searchable-dropdown::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .searchable-dropdown::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        .searchable-options-list {
+            padding: 4px 0;
+            list-style: none;
+            margin: 0;
+        }
+        .searchable-option {
+            padding: 9px 12px;
+            font-size: 13px;
+            color: #202b43;
+            cursor: pointer;
+            transition: background .1s, color .1s;
+            user-select: none;
+        }
+        .searchable-option:hover,
+        .searchable-option.is-highlighted {
+            background: #f0f4ff;
+            color: #4658a9;
+        }
+        .searchable-option.is-selected {
+            background: #eef2ff;
+            color: #4658a9;
+            font-weight: 600;
+        }
+        .searchable-highlight {
+            background: #dbeafe;
+            color: #1e40af;
+            padding: 0 2px;
+            border-radius: 2px;
+            font-weight: 600;
+        }
+        .searchable-no-match {
+            padding: 12px;
+            font-size: 12px;
+            color: #778198;
+            text-align: center;
+        }
+        .searchable-hidden-select {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            padding: 0 !important;
+            margin: -1px !important;
+            overflow: hidden !important;
+            clip: rect(0, 0, 0, 0) !important;
+            white-space: nowrap !important;
+            border: 0 !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
     </style>
 </head>
 
@@ -637,7 +797,19 @@ $isEditing = $editItem !== null;
                     <small>Management System</small>
                 </div>
             </div>
-
+<?php
+if (empty($_SESSION['logout_csrf_token'])) {
+    $_SESSION['logout_csrf_token'] = bin2hex(random_bytes(32));
+}
+?>
+<div class="sidebar-user">
+    <strong>
+        <?= htmlspecialchars($_SESSION['user_name'] ?? 'User', ENT_QUOTES, 'UTF-8') ?>
+    </strong>
+    <small>
+        <?= htmlspecialchars($_SESSION['user_role'] ?? '', ENT_QUOTES, 'UTF-8') ?>
+    </small>
+</div>
             <p class="menu-label">MAIN MENU</p>
             <a class="nav-link" href="../index.php">▦ &nbsp; Dashboard</a>
             <a class="nav-link" href="categories.php">▤ &nbsp; Categories</a>
@@ -654,10 +826,26 @@ $isEditing = $editItem !== null;
             <a class="nav-link" href="invoices.php">📄 &nbsp; Invoices</a>
             <a class="nav-link" href="payments.php">💳 &nbsp; Payments</a>
             <a class="nav-link" href="reports.php">📊 &nbsp; Reports</a>
+            <?php if (isAdmin()): ?>
+    <a class="nav-link" href="pages/users.php">
+        👥 &nbsp; User Management
+    </a>
+<?php endif; ?>
+<form action="logout.php" method="POST" class="sidebar-logout-form">
+    <input
+        type="hidden"
+        name="csrf_token"
+        value="<?= htmlspecialchars($_SESSION['logout_csrf_token'], ENT_QUOTES, 'UTF-8') ?>"
+    >
 
-            <div class="sidebar-footer">
-                <span class="status-dot"></span> Local system running
-            </div>
+    <button type="submit" class="sidebar-logout-button">
+        <span class="logout-icon">↪</span>
+        <span>Logout</span>
+        <span class="logout-arrow">→</span>
+    </button>
+</form>
+
+            
         </aside>
 
         <main class="main">
@@ -965,6 +1153,414 @@ $isEditing = $editItem !== null;
                 alert(error.message || 'Unable to generate the item code.');
             }
         }
+
+        /* ===== Searchable Select Component ===== */
+        function setupSearchableSelect(selectId, placeholderText) {
+            const select = document.getElementById(selectId);
+            if (!select) return;
+
+            if (select.dataset.searchableInitialized === 'true') return;
+            select.dataset.searchableInitialized = 'true';
+
+            // Wrap the original select
+            const wrapper = document.createElement('div');
+            wrapper.className = 'searchable-select-wrapper';
+            select.parentNode.insertBefore(wrapper, select);
+            wrapper.appendChild(select);
+
+            // Hide the native select safely from view while retaining DOM validity
+            select.classList.add('searchable-hidden-select');
+            select.tabIndex = -1;
+            select.setAttribute('aria-hidden', 'true');
+            const wasRequired = select.hasAttribute('required');
+            select.removeAttribute('required');
+
+            // Build searchable text input control
+            const control = document.createElement('div');
+            control.className = 'searchable-control';
+
+            const inputId = selectId + '_search';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.id = inputId;
+            input.className = 'searchable-input';
+            input.placeholder = placeholderText || 'Type to search...';
+            input.autocomplete = 'off';
+            input.spellcheck = false;
+            if (wasRequired) {
+                input.required = true;
+            }
+
+            // Associate label if available
+            const label = document.querySelector('label[for="' + selectId + '"]');
+            if (label) {
+                label.setAttribute('for', inputId);
+            }
+
+            const actions = document.createElement('div');
+            actions.className = 'searchable-actions';
+
+            const clearBtn = document.createElement('button');
+            clearBtn.type = 'button';
+            clearBtn.className = 'searchable-clear';
+            clearBtn.innerHTML = '&times;';
+            clearBtn.title = 'Clear selection';
+            clearBtn.tabIndex = -1;
+
+            const arrowBtn = document.createElement('button');
+            arrowBtn.type = 'button';
+            arrowBtn.className = 'searchable-arrow';
+            arrowBtn.innerHTML = '&#9662;';
+            arrowBtn.title = 'Toggle options';
+            arrowBtn.tabIndex = -1;
+
+            actions.appendChild(clearBtn);
+            actions.appendChild(arrowBtn);
+            control.appendChild(input);
+            control.appendChild(actions);
+            wrapper.appendChild(control);
+
+            // Build dropdown container
+            const dropdown = document.createElement('div');
+            dropdown.className = 'searchable-dropdown';
+            dropdown.addEventListener('pointerdown', function(e) {
+                e.preventDefault();
+            });
+
+            const optionsList = document.createElement('div');
+            optionsList.className = 'searchable-options-list';
+
+            const noMatch = document.createElement('div');
+            noMatch.className = 'searchable-no-match';
+            noMatch.textContent = 'No matching options';
+            noMatch.style.display = 'none';
+
+            dropdown.appendChild(optionsList);
+            dropdown.appendChild(noMatch);
+            wrapper.appendChild(dropdown);
+
+            function escapeHtml(str) {
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            function highlightMatches(text, query) {
+                if (!query || !query.trim()) {
+                    return escapeHtml(text);
+                }
+                const words = query.trim().split(/\s+/).filter(Boolean);
+                if (words.length === 0) {
+                    return escapeHtml(text);
+                }
+                const escapedWords = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+                const pattern = new RegExp('(' + escapedWords.join('|') + ')', 'gi');
+                const safeText = escapeHtml(text);
+                return safeText.replace(pattern, '<mark class="searchable-highlight">$1</mark>');
+            }
+
+            function buildOptions() {
+                optionsList.innerHTML = '';
+                const optionsData = [];
+
+                Array.from(select.options).forEach((opt, idx) => {
+                    if (opt.value === '' && idx === 0) return;
+                    const optEl = document.createElement('div');
+                    optEl.className = 'searchable-option';
+                    optEl.dataset.value = opt.value;
+                    optEl.dataset.label = opt.text.trim();
+                    optEl.textContent = opt.text.trim();
+
+                    if (opt.value === select.value && opt.value !== '') {
+                        optEl.classList.add('is-selected');
+                    }
+
+                    optEl.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        chooseOption(opt.value, opt.text.trim());
+                    });
+
+                    optionsList.appendChild(optEl);
+                    optionsData.push({
+                        value: opt.value,
+                        label: opt.text.trim(),
+                        el: optEl
+                    });
+                });
+
+                return optionsData;
+            }
+
+            let options = buildOptions();
+
+            function syncFromSelect() {
+                const selectedOpt = select.options[select.selectedIndex];
+                if (selectedOpt && selectedOpt.value !== '') {
+                    input.value = selectedOpt.text.trim();
+                    clearBtn.style.display = 'flex';
+                    input.setCustomValidity('');
+                    updateSelectedClass(selectedOpt.value);
+                } else {
+                    input.value = '';
+                    clearBtn.style.display = 'none';
+                    if (wasRequired) {
+                        input.setCustomValidity('Please select an option from the list.');
+                    }
+                    updateSelectedClass('');
+                }
+            }
+
+            function updateSelectedClass(val) {
+                options.forEach(item => {
+                    if (item.value === val && val !== '') {
+                        item.el.classList.add('is-selected');
+                    } else {
+                        item.el.classList.remove('is-selected');
+                    }
+                });
+            }
+
+            syncFromSelect();
+
+            function filterOptions(query) {
+                const q = (query || '').toLowerCase().trim();
+                const words = q.split(/\s+/).filter(Boolean);
+                let matchCount = 0;
+                let firstMatch = null;
+
+                options.forEach(item => {
+                    const text = item.label.toLowerCase();
+                    const matches = words.length === 0 || words.every(w => text.includes(w));
+                    if (matches) {
+                        item.el.style.display = '';
+                        item.el.innerHTML = highlightMatches(item.label, q);
+                        matchCount++;
+                        if (!firstMatch) firstMatch = item.el;
+                    } else {
+                        item.el.style.display = 'none';
+                        item.el.classList.remove('is-highlighted');
+                    }
+                });
+
+                noMatch.style.display = matchCount === 0 ? 'block' : 'none';
+
+                clearHighlight();
+                if (firstMatch) {
+                    firstMatch.classList.add('is-highlighted');
+                }
+            }
+
+            function openDropdown() {
+                if (wrapper.classList.contains('is-open')) return;
+                wrapper.classList.add('is-open');
+                const field = wrapper.closest('.field');
+                if (field) {
+                    field.style.position = 'relative';
+                    field.style.zIndex = '100';
+                }
+                filterOptions('');
+                const selected = optionsList.querySelector('.searchable-option.is-selected');
+                if (selected && selected.style.display !== 'none') {
+                    clearHighlight();
+                    selected.classList.add('is-highlighted');
+                    selected.scrollIntoView({ block: 'nearest' });
+                }
+            }
+
+            function closeDropdown() {
+                wrapper.classList.remove('is-open');
+                const field = wrapper.closest('.field');
+                if (field) {
+                    field.style.position = '';
+                    field.style.zIndex = '';
+                }
+                clearHighlight();
+            }
+
+            function clearHighlight() {
+                optionsList.querySelectorAll('.searchable-option.is-highlighted').forEach(el => {
+                    el.classList.remove('is-highlighted');
+                });
+            }
+
+            function chooseOption(value, label) {
+                select.value = value;
+                input.value = label;
+                clearBtn.style.display = 'flex';
+                input.setCustomValidity('');
+                updateSelectedClass(value);
+                closeDropdown();
+
+                // Fire native change event to trigger code generation or handlers
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+
+            function clearSelection() {
+                select.value = '';
+                input.value = '';
+                clearBtn.style.display = 'none';
+                updateSelectedClass('');
+                if (wasRequired) {
+                    input.setCustomValidity('Please select an option from the list.');
+                }
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                filterOptions('');
+                input.focus();
+                openDropdown();
+            }
+
+            input.addEventListener('focus', function() {
+                openDropdown();
+                this.select();
+            });
+
+            input.addEventListener('input', function() {
+                if (!wrapper.classList.contains('is-open')) {
+                    openDropdown();
+                }
+                filterOptions(this.value);
+
+                const q = this.value.trim().toLowerCase();
+                const exact = options.find(o => o.label.toLowerCase() === q);
+                if (exact) {
+                    select.value = exact.value;
+                    input.setCustomValidity('');
+                    clearBtn.style.display = 'flex';
+                    updateSelectedClass(exact.value);
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                } else {
+                    if (wasRequired) {
+                        input.setCustomValidity('Please select an option from the list.');
+                    }
+                }
+            });
+
+            input.addEventListener('keydown', function(e) {
+                if (!wrapper.classList.contains('is-open')) {
+                    if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter') {
+                        openDropdown();
+                        e.preventDefault();
+                        return;
+                    }
+                }
+
+                const visibleOptions = Array.from(optionsList.querySelectorAll('.searchable-option'))
+                    .filter(el => el.style.display !== 'none');
+
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (visibleOptions.length === 0) return;
+                    let currentIndex = visibleOptions.findIndex(el => el.classList.contains('is-highlighted'));
+                    clearHighlight();
+                    const nextIndex = (currentIndex + 1) % visibleOptions.length;
+                    visibleOptions[nextIndex].classList.add('is-highlighted');
+                    visibleOptions[nextIndex].scrollIntoView({ block: 'nearest' });
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (visibleOptions.length === 0) return;
+                    let currentIndex = visibleOptions.findIndex(el => el.classList.contains('is-highlighted'));
+                    clearHighlight();
+                    const prevIndex = currentIndex <= 0 ? visibleOptions.length - 1 : currentIndex - 1;
+                    visibleOptions[prevIndex].classList.add('is-highlighted');
+                    visibleOptions[prevIndex].scrollIntoView({ block: 'nearest' });
+                } else if (e.key === 'Enter') {
+                    if (wrapper.classList.contains('is-open')) {
+                        const highlighted = visibleOptions.find(el => el.classList.contains('is-highlighted')) || visibleOptions[0];
+                        if (highlighted) {
+                            e.preventDefault();
+                            chooseOption(highlighted.dataset.value, highlighted.dataset.label);
+                        }
+                    }
+                } else if (e.key === 'Tab') {
+                    if (wrapper.classList.contains('is-open')) {
+                        if (!e.shiftKey) {
+                            const highlighted = visibleOptions.find(el => el.classList.contains('is-highlighted')) || visibleOptions[0];
+                            if (highlighted && input.value.trim() !== '') {
+                                chooseOption(highlighted.dataset.value, highlighted.dataset.label);
+                            } else {
+                                closeDropdown();
+                            }
+                        } else {
+                            closeDropdown();
+                        }
+                    }
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeDropdown();
+                    syncFromSelect();
+                }
+            });
+
+            clearBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                clearSelection();
+            });
+
+            arrowBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (wrapper.classList.contains('is-open')) {
+                    closeDropdown();
+                } else {
+                    input.focus();
+                    openDropdown();
+                }
+            });
+
+            document.addEventListener('pointerdown', function(e) {
+                if (!wrapper.contains(e.target)) {
+                    if (wrapper.classList.contains('is-open')) {
+                        closeDropdown();
+                        const selectedOpt = select.options[select.selectedIndex];
+                        if (selectedOpt && selectedOpt.value !== '') {
+                            input.value = selectedOpt.text.trim();
+                            input.setCustomValidity('');
+                            clearBtn.style.display = 'flex';
+                        } else {
+                            input.value = '';
+                            clearBtn.style.display = 'none';
+                            if (wasRequired) {
+                                input.setCustomValidity('Please select an option from the list.');
+                            }
+                        }
+                    }
+                }
+            });
+
+            const form = select.closest('form');
+            if (form) {
+                form.addEventListener('reset', function() {
+                    setTimeout(syncFromSelect, 0);
+                });
+
+                if (!form.dataset.searchableBound) {
+                    form.dataset.searchableBound = 'true';
+                    form.addEventListener('submit', function(e) {
+                        const catSelect = document.getElementById('category_id');
+                        const catInput = document.getElementById('category_id_search');
+                        if (catSelect && (!catSelect.value || catSelect.value === '0') && catInput) {
+                            e.preventDefault();
+                            catInput.setCustomValidity('Please select a category from the list.');
+                            catInput.reportValidity();
+                            catInput.focus();
+                            return;
+                        }
+                        const unitSelect = document.getElementById('unit_id');
+                        const unitInput = document.getElementById('unit_id_search');
+                        if (unitSelect && (!unitSelect.value || unitSelect.value === '0') && unitInput) {
+                            e.preventDefault();
+                            unitInput.setCustomValidity('Please select a measurement unit from the list.');
+                            unitInput.reportValidity();
+                            unitInput.focus();
+                            return;
+                        }
+                    });
+                }
+            }
+        }
+
+        // Initialize searchable dropdowns for Category and Unit
+        setupSearchableSelect('category_id', 'Type or select category...');
+        setupSearchableSelect('unit_id', 'Type or select unit...');
 
         /* ===== Tab switching ===== */
         document.querySelectorAll('.tab-btn').forEach(function(btn) {

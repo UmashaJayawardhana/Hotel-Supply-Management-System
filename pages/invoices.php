@@ -2,17 +2,24 @@
 <?php
 session_start();
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/auth.php';
+requireLogin();
 
-function e($value): string
-{
-    return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+if (!function_exists('e')) {
+    function e($value): string
+    {
+        return htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
+    }
 }
 
-function invoiceMoney($amount): string
-{
-    return number_format((float)$amount, 2);
+if (!function_exists('invoiceMoney')) {
+    function invoiceMoney($amount): string
+    {
+        return number_format((float)$amount, 2);
+    }
 }
 
+if (!function_exists('invoiceStatusInfo')) {
 function invoiceStatusInfo(array $invoice): array
 {
     $status = (string)$invoice['Status'];
@@ -40,6 +47,7 @@ function invoiceStatusInfo(array $invoice): array
     }
 
     return ['Issued', 'status-issued'];
+}
 }
 
 /*
@@ -261,6 +269,241 @@ if ($viewId > 0) {
 $flash = $_SESSION['invoice_flash'] ?? null;
 unset($_SESSION['invoice_flash']);
 
+/*
+|--------------------------------------------------------------------------
+| Standalone 8cm Thermal Receipt Mode
+|--------------------------------------------------------------------------
+*/
+if ($viewInvoice && (($_GET['mode'] ?? '') === 'receipt')) {
+    [$displayStatus, $displayClass] = invoiceStatusInfo($viewInvoice);
+    $invoiceTotal = (float)$viewInvoice['TotalAmount'];
+    $invoicePaid = (float)$viewInvoice['PaidAmount'];
+    $invoiceBalance = max(0, $invoiceTotal - $invoicePaid);
+    ?>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Receipt - <?= e($viewInvoice['InvoiceNo']) ?> (8cm Thermal)</title>
+        <style>
+            * { box-sizing: border-box; }
+            body {
+                margin: 0; padding: 20px 10px;
+                background: #e2e8f0; color: #000;
+                font-family: 'Consolas', 'Courier New', 'Courier', monospace;
+                display: flex; flex-direction: column; align-items: center;
+            }
+            .no-print { margin-bottom: 16px; display: flex; gap: 8px; }
+            .btn {
+                padding: 8px 14px; font-size: 13px; font-weight: 600;
+                border-radius: 6px; cursor: pointer; text-decoration: none; border: 0;
+            }
+            .btn-primary { background: #3157c8; color: #fff; }
+            .btn-secondary { background: #fff; color: #334155; border: 1px solid #cbd5e1; }
+            .invoice-paper {
+                width: 80mm; max-width: 340px; background: #fff;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.12); border: 1px solid #cbd5e1;
+                border-radius: 4px; padding: 16px 14px 28px; font-size: 12px; line-height: 1.35;
+            }
+            .thermal-header { text-align: center; margin-bottom: 8px; }
+            .thermal-header .brand-name { font-size: 15px; font-weight: 800; color: #000; }
+            .thermal-header .brand-sub { font-size: 11px; color: #4b5563; margin-top: 2px; }
+            .receipt-divider-double { border-top: 2px solid #000; margin: 8px 0; }
+            .receipt-divider-dash { border-top: 1px dashed #4b5563; margin: 8px 0; }
+            .receipt-title { font-size: 14px; font-weight: 800; text-align: center; margin: 4px 0; }
+            .thermal-meta, .thermal-customer { font-size: 11.5px; }
+            .meta-row { display: flex; justify-content: space-between; margin: 3px 0; gap: 8px; }
+            .meta-row span { color: #4b5563; }
+            .meta-row strong { color: #000; }
+            .section-label { font-size: 10px; font-weight: 700; color: #4b5563; text-transform: uppercase; margin-bottom: 3px; }
+            .customer-name { font-size: 13px; font-weight: 800; color: #000; }
+            .customer-sub { font-size: 11px; color: #374151; margin-top: 2px; }
+            .thermal-items-table { width: 100%; border-collapse: collapse; margin: 6px 0; }
+            .thermal-items-table th {
+                font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+                padding: 4px 2px; border-top: 1px dashed #000; border-bottom: 1px dashed #000;
+                background: transparent; color: #000;
+            }
+            .th-item { text-align: left; }
+            .th-qty { text-align: right; width: 45px; }
+            .th-price { text-align: right; width: 62px; }
+            .th-total { text-align: right; width: 70px; }
+            .item-main-row td { padding-top: 5px; padding-bottom: 1px; font-weight: 700; color: #000; font-size: 11.5px; }
+            .item-details-row td { padding-bottom: 5px; font-size: 11px; color: #374151; border-bottom: 1px dotted #e2e8f0; }
+            .item-code-unit { font-size: 10px; color: #6b7280; }
+            .item-qty, .item-price, .item-total { text-align: right; white-space: nowrap; }
+            .item-total { font-weight: 700; color: #000; }
+            .thermal-totals { margin: 6px 0; }
+            .totals-row { display: flex; justify-content: space-between; font-size: 11.5px; margin: 3px 0; }
+            .grand-total-row { font-size: 14px; font-weight: 800; color: #000; padding: 4px 0; }
+            .thermal-notes { font-size: 11px; color: #374151; margin: 6px 0; word-break: break-word; }
+            .thermal-footer { text-align: center; margin-top: 10px; font-size: 11px; }
+            .footer-msg { font-weight: 700; color: #000; }
+            .footer-sub { font-size: 10px; color: #4b5563; margin-top: 2px; }
+            .signature-block { margin: 16px 0 10px; text-align: left; font-size: 11px; }
+            .sig-line, .sig-date { margin: 6px 0; color: #374151; }
+            .print-time { font-size: 9.5px; color: #9ca3af; margin-top: 10px; }
+            .cut-line { font-size: 9px; color: #cbd5e1; letter-spacing: 2px; margin-top: 8px; }
+            @media print {
+                @page { size: 80mm auto; margin: 0; }
+                body { background: #fff !important; padding: 0 !important; width: 80mm !important; }
+                .no-print { display: none !important; }
+                .invoice-paper {
+                    width: 76mm !important; max-width: 76mm !important;
+                    margin: 0 auto !important; padding: 2mm 1mm 16mm 1mm !important;
+                    border: none !important; box-shadow: none !important;
+                }
+                .thermal-header .brand-sub, .meta-row span, .section-label, .customer-sub, .item-details-row td, .item-code-unit, .thermal-notes, .footer-sub, .sig-line, .sig-date {
+                    color: #000 !important;
+                }
+                .receipt-divider-dash { border-top: 1px dashed #000 !important; }
+                .receipt-divider-double { border-top: 2px solid #000 !important; }
+                .thermal-items-table th { border-top: 1px dashed #000 !important; border-bottom: 1px dashed #000 !important; color: #000 !important; }
+                .item-details-row td { border-bottom: 1px dotted #000 !important; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="no-print">
+            <button type="button" class="btn btn-primary" onclick="window.print()">🖨 Print 8cm Thermal</button>
+            <button type="button" class="btn btn-secondary" onclick="window.close()">✕ Close</button>
+        </div>
+        
+                <div class="invoice-paper">
+                    <div class="thermal-header">
+                        <div class="brand-name">HOTEL SUPPLY MANAGEMENT</div>
+                        <div class="brand-sub">Wholesale Hotel & Food Supplies</div>
+                        <div class="brand-sub">Colombo, Sri Lanka · Tel: +94 77 123 4567</div>
+                        <div class="receipt-divider-double"></div>
+                        <div class="receipt-title">DELIVERY INVOICE</div>
+                        <div class="receipt-divider-dash"></div>
+                    </div>
+
+                    <div class="thermal-meta">
+                        <div class="meta-row"><span>Invoice No:</span><strong><?= e($viewInvoice['InvoiceNo']) ?></strong></div>
+                        <div class="meta-row"><span>Invoice Date:</span><span><?= e($viewInvoice['InvoiceDate']) ?></span></div>
+                        <div class="meta-row"><span>Due Date:</span><span><?= e($viewInvoice['DueDate']) ?></span></div>
+                        <div class="meta-row"><span>Order Ref:</span><span>#<?= (int)$viewInvoice['OrderID'] ?></span></div>
+                        <div class="meta-row"><span>Delivery Ref:</span><span><?= e($viewInvoice['DeliveryNo'] ?: '#' . (int)$viewInvoice['DeliveryID']) ?></span></div>
+                        <div class="meta-row"><span>Delivery Date:</span><span><?= e($viewInvoice['DeliveryDate']) ?></span></div>
+                        <div class="meta-row"><span>Status:</span><strong class="receipt-status <?= e($displayClass) ?>"><?= strtoupper(e($displayStatus)) ?></strong></div>
+                    </div>
+
+                    <div class="receipt-divider-dash"></div>
+
+                    <div class="thermal-customer">
+                        <div class="section-label">BILL TO (CUSTOMER):</div>
+                        <div class="customer-name"><?= e($viewInvoice['HotelName']) ?></div>
+                        <?php if ($viewInvoice['ContactPerson']): ?>
+                            <div class="customer-sub">Attn: <?= e($viewInvoice['ContactPerson']) ?></div>
+                        <?php endif; ?>
+                        <?php if ($viewInvoice['HotelPhone']): ?>
+                            <div class="customer-sub">Tel: <?= e($viewInvoice['HotelPhone']) ?></div>
+                        <?php endif; ?>
+                        <?php if ($viewInvoice['HotelAddress']): ?>
+                            <div class="customer-sub"><?= nl2br(e($viewInvoice['HotelAddress'])) ?></div>
+                        <?php endif; ?>
+                    </div>
+
+                    <div class="receipt-divider-double"></div>
+
+                    <table class="thermal-items-table">
+                        <thead>
+                            <tr>
+                                <th class="th-item">ITEM / CODE</th>
+                                <th class="th-qty">QTY</th>
+                                <th class="th-price">PRICE</th>
+                                <th class="th-total">TOTAL</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php
+                        $totalItemsCount = count($invoiceItems);
+                        $totalQtySum = 0;
+                        foreach ($invoiceItems as $item):
+                            $totalQtySum += (float)$item['SuppliedQuantity'];
+                            $isNos = strtoupper((string)($item['UnitSymbol'] ?? '')) === 'NOS';
+                        ?>
+                            <tr class="item-main-row">
+                                <td colspan="4" class="item-name"><?= e($item['ItemName']) ?></td>
+                            </tr>
+                            <tr class="item-details-row">
+                                <td class="item-code-unit">
+                                    <?= e($item['ItemCode'] ?: '—') ?> (<?= e($item['UnitSymbol'] ?: 'NOS') ?>)
+                                </td>
+                                <td class="item-qty">
+                                    <?= e(number_format((float)$item['SuppliedQuantity'], $isNos ? 0 : 3)) ?>
+                                </td>
+                                <td class="item-price">
+                                    <?= invoiceMoney($item['UnitPrice']) ?>
+                                </td>
+                                <td class="item-total">
+                                    <?= invoiceMoney($item['LineTotal']) ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if (!$invoiceItems): ?>
+                            <tr><td colspan="4" style="text-align:center;padding:10px;font-style:italic">No items on this invoice.</td></tr>
+                        <?php endif; ?>
+                        </tbody>
+                    </table>
+
+                    <div class="receipt-divider-dash"></div>
+
+                    <div class="thermal-totals">
+                        <div class="totals-row">
+                            <span>Item Lines:</span>
+                            <span><?= $totalItemsCount ?> item(s)</span>
+                        </div>
+                        <div class="totals-row">
+                            <span>Total Quantity:</span>
+                            <span><?= number_format($totalQtySum, 3) ?></span>
+                        </div>
+                        <div class="receipt-divider-dash"></div>
+                        <div class="totals-row">
+                            <span>SUBTOTAL:</span>
+                            <strong>Rs. <?= invoiceMoney($invoiceTotal) ?></strong>
+                        </div>
+                        <div class="totals-row">
+                            <span>PAID AMOUNT:</span>
+                            <span>Rs. <?= invoiceMoney($invoicePaid) ?></span>
+                        </div>
+                        <div class="receipt-divider-double"></div>
+                        <div class="totals-row grand-total-row">
+                            <span>BALANCE DUE:</span>
+                            <strong>Rs. <?= invoiceMoney($invoiceBalance) ?></strong>
+                        </div>
+                        <div class="receipt-divider-double"></div>
+                    </div>
+
+                    <?php if (!empty($viewInvoice['Notes'])): ?>
+                        <div class="thermal-notes">
+                            <strong>Notes:</strong> <?= nl2br(e($viewInvoice['Notes'])) ?>
+                        </div>
+                        <div class="receipt-divider-dash"></div>
+                    <?php endif; ?>
+
+                    <div class="thermal-footer">
+                        <div class="footer-msg">Thank you for your business!</div>
+                        <div class="footer-sub">Goods received in good condition.</div>
+                        <div class="signature-block">
+                            <div class="sig-line">Customer Signature: _______________________</div>
+                            <div class="sig-date">Date: ___________________________________</div>
+                        </div>
+                        <div class="print-time">Printed: <?= date('Y-m-d H:i:s') ?></div>
+                        <div class="cut-line">· · · · · · · · · · · · · · · · · · · · · · · ·</div>
+                    </div>
+                </div>
+        <?php if (!empty($_GET['print'])): ?>
+            <script>window.addEventListener('DOMContentLoaded', () => window.print());</script>
+        <?php endif; ?>
+    </body>
+    </html>
+    <?php
+    exit;
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -346,43 +589,57 @@ unset($_SESSION['invoice_flash']);
         .amount { font-weight:700; white-space:nowrap; }
         .balance { font-weight:700; color:#b54708; white-space:nowrap; }
 
+        /* 8cm Thermal Printer Styles */
+        .invoice-paper-wrapper {
+            background:#f1f5f9; padding:24px 12px; border-radius:10px;
+            display:flex; justify-content:center;
+        }
         .invoice-paper {
-            max-width:900px; margin:0 auto; background:#fff;
-            border:1px solid #e7ebf0; border-radius:8px; padding:36px;
+            width:80mm; max-width:340px; background:#fff;
+            box-shadow:0 4px 20px rgba(0,0,0,0.12); border:1px solid #cbd5e1;
+            border-radius:4px; padding:16px 14px 28px;
+            font-family:'Consolas','Courier New','Courier',monospace;
+            font-size:12px; color:#111827; line-height:1.35; box-sizing:border-box;
         }
-        .invoice-title {
-            display:flex; justify-content:space-between; align-items:flex-start;
-            gap:20px; padding-bottom:24px; border-bottom:2px solid #e7ebf0;
+        .thermal-header { text-align:center; margin-bottom:8px; }
+        .thermal-header .brand-name { font-size:15px; font-weight:800; color:#000; letter-spacing:0.5px; }
+        .thermal-header .brand-sub { font-size:11px; color:#4b5563; margin-top:2px; }
+        .receipt-divider-double { border-top:2px solid #000; margin:8px 0; }
+        .receipt-divider-dash { border-top:1px dashed #4b5563; margin:8px 0; }
+        .receipt-title { font-size:14px; font-weight:800; text-align:center; margin:4px 0; letter-spacing:1px; }
+        .thermal-meta, .thermal-customer { font-size:11.5px; }
+        .meta-row { display:flex; justify-content:space-between; margin:3px 0; gap:8px; }
+        .meta-row span { color:#4b5563; }
+        .meta-row strong { color:#000; }
+        .section-label { font-size:10px; font-weight:700; color:#4b5563; text-transform:uppercase; margin-bottom:3px; }
+        .customer-name { font-size:13px; font-weight:800; color:#000; }
+        .customer-sub { font-size:11px; color:#374151; margin-top:2px; }
+        .thermal-items-table { width:100%; border-collapse:collapse; margin:6px 0; }
+        .thermal-items-table th {
+            font-size:10.5px; font-weight:700; text-transform:uppercase;
+            padding:4px 2px; border-top:1px dashed #000; border-bottom:1px dashed #000;
+            background:transparent; color:#000;
         }
-        .invoice-title h2 { margin:0 0 7px; font-size:27px; color:#172b4d; }
-        .invoice-number { text-align:right; }
-        .invoice-number strong { font-size:19px; }
-        .invoice-info {
-            display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
-            gap:24px; margin:24px 0;
-        }
-        .invoice-info h3 { margin:0 0 10px; font-size:13px; color:#667085; text-transform:uppercase; }
-        .invoice-info p { margin:4px 0; font-size:13px; overflow-wrap:anywhere; }
-        .invoice-items { width:100%; border-collapse:collapse; margin-top:20px; }
-        .invoice-items th,.invoice-items td {
-            padding:12px 10px; border-bottom:1px solid #e7ebf0; text-align:left;
-        }
-        .invoice-items th { background:#f8fafc; font-size:12px; color:#667085; }
-        .invoice-items td { font-size:13px; }
-        .text-right { text-align:right !important; }
-        .invoice-totals { width:340px; max-width:100%; margin:20px 0 0 auto; }
-        .total-row {
-            display:flex; justify-content:space-between; gap:16px;
-            padding:8px 0; font-size:13px;
-        }
-        .total-row.grand-total {
-            font-size:18px; font-weight:700; border-top:2px solid #172b4d;
-            margin-top:6px; padding-top:14px;
-        }
-        .invoice-note {
-            margin-top:32px; padding-top:18px; border-top:1px solid #e7ebf0;
-            font-size:12px; color:#667085;
-        }
+        .th-item { text-align:left; }
+        .th-qty { text-align:right; width:45px; }
+        .th-price { text-align:right; width:62px; }
+        .th-total { text-align:right; width:70px; }
+        .item-main-row td { padding-top:5px; padding-bottom:1px; font-weight:700; color:#000; font-size:11.5px; }
+        .item-details-row td { padding-bottom:5px; font-size:11px; color:#374151; border-bottom:1px dotted #e2e8f0; }
+        .item-code-unit { font-size:10px; color:#6b7280; }
+        .item-qty, .item-price, .item-total { text-align:right; white-space:nowrap; }
+        .item-total { font-weight:700; color:#000; }
+        .thermal-totals { margin:6px 0; }
+        .totals-row { display:flex; justify-content:space-between; font-size:11.5px; margin:3px 0; }
+        .grand-total-row { font-size:14px; font-weight:800; color:#000; padding:4px 0; }
+        .thermal-notes { font-size:11px; color:#374151; margin:6px 0; word-break:break-word; }
+        .thermal-footer { text-align:center; margin-top:10px; font-size:11px; }
+        .footer-msg { font-weight:700; color:#000; }
+        .footer-sub { font-size:10px; color:#4b5563; margin-top:2px; }
+        .signature-block { margin:16px 0 10px; text-align:left; font-size:11px; }
+        .sig-line, .sig-date { margin:6px 0; color:#374151; }
+        .print-time { font-size:9.5px; color:#9ca3af; margin-top:10px; }
+        .cut-line { font-size:9px; color:#cbd5e1; letter-spacing:2px; margin-top:8px; }
         .flash {
             padding:13px 15px; border-radius:8px; margin-bottom:18px; font-size:13px;
         }
@@ -407,15 +664,56 @@ unset($_SESSION['invoice_flash']);
         }
 
         @media print {
-            @page { size:A4; margin:14mm; }
-            body { background:#fff !important; }
-            .sidebar,.page-header,.invoice-stats,.list-panel,.no-print,
-            .flash { display:none !important; }
-            .app,.main { display:block !important; width:100% !important; margin:0 !important; padding:0 !important; }
-            .panel { border:0 !important; box-shadow:none !important; padding:0 !important; margin:0 !important; }
-            .invoice-paper { max-width:none; border:0; border-radius:0; padding:0; }
-            .invoice-items th { background:#eee !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-            a { color:#000 !important; text-decoration:none !important; }
+            @page {
+                size: 80mm auto;
+                margin: 0;
+            }
+            html, body {
+                width: 80mm !important;
+                min-width: 80mm !important;
+                max-width: 80mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #fff !important;
+                color: #000 !important;
+                font-family: 'Consolas', 'Courier New', 'Courier', monospace !important;
+                font-size: 11px !important;
+                line-height: 1.3 !important;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            .sidebar, .page-header, .invoice-stats, .list-panel, .no-print, .flash, .panel-heading {
+                display: none !important;
+            }
+            .app, .main, .panel, .invoice-paper-wrapper {
+                display: block !important;
+                width: 80mm !important;
+                max-width: 80mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+                box-shadow: none !important;
+                background: transparent !important;
+            }
+            .invoice-paper {
+                width: 76mm !important;
+                max-width: 76mm !important;
+                margin: 0 auto !important;
+                padding: 2mm 1mm 16mm 1mm !important;
+                border: none !important;
+                box-shadow: none !important;
+                background: #fff !important;
+                font-size: 11px !important;
+                color: #000 !important;
+            }
+            .thermal-header .brand-sub, .meta-row span, .section-label, .customer-sub, .item-details-row td, .item-code-unit, .thermal-notes, .footer-sub, .sig-line, .sig-date {
+                color: #000 !important;
+            }
+            .receipt-divider-dash { border-top: 1px dashed #000 !important; }
+            .receipt-divider-double { border-top: 2px solid #000 !important; }
+            .thermal-items-table th { border-top: 1px dashed #000 !important; border-bottom: 1px dashed #000 !important; color: #000 !important; }
+            .item-details-row td { border-bottom: 1px dotted #000 !important; }
+            a { color: #000 !important; text-decoration: none !important; }
         }
     </style>
 </head>
@@ -426,7 +724,19 @@ unset($_SESSION['invoice_flash']);
             <div class="brand-icon">HS</div>
             <div><h2>Hotel Supply</h2><small>Management System</small></div>
         </div>
-
+<?php
+if (empty($_SESSION['logout_csrf_token'])) {
+    $_SESSION['logout_csrf_token'] = bin2hex(random_bytes(32));
+}
+?>
+<div class="sidebar-user">
+    <strong>
+        <?= htmlspecialchars($_SESSION['user_name'] ?? 'User', ENT_QUOTES, 'UTF-8') ?>
+    </strong>
+    <small>
+        <?= htmlspecialchars($_SESSION['user_role'] ?? '', ENT_QUOTES, 'UTF-8') ?>
+    </small>
+</div>
         <p class="menu-label">MAIN MENU</p>
         <a class="nav-link" href="../index.php">▦ &nbsp; Dashboard</a>
         <a class="nav-link" href="categories.php">▤ &nbsp; Categories</a>
@@ -443,6 +753,24 @@ unset($_SESSION['invoice_flash']);
         <a class="nav-link active" href="invoices.php">📄 &nbsp; Invoices</a>
         <a class="nav-link" href="payments.php">💳 &nbsp; Payments</a>
         <a class="nav-link" href="reports.php">📊 &nbsp; Reports</a>
+        <?php if (isAdmin()): ?>
+    <a class="nav-link" href="pages/users.php">
+        👥 &nbsp; User Management
+    </a>
+<?php endif; ?>
+<form action="logout.php" method="POST" class="sidebar-logout-form">
+    <input
+        type="hidden"
+        name="csrf_token"
+        value="<?= htmlspecialchars($_SESSION['logout_csrf_token'], ENT_QUOTES, 'UTF-8') ?>"
+    >
+
+    <button type="submit" class="sidebar-logout-button">
+        <span class="logout-icon">↪</span>
+        <span>Logout</span>
+        <span class="logout-arrow">→</span>
+    </button>
+</form>
     </aside>
 
     <main class="main">
@@ -489,121 +817,143 @@ unset($_SESSION['invoice_flash']);
             <section class="panel">
                 <div class="panel-heading no-print">
                     <div>
-                        <h2>Invoice Details</h2>
-                        <p class="muted" style="margin:6px 0 0">Review the invoice before printing.</p>
+                        <h2>Invoice Details — Standard 8cm Thermal Format</h2>
+                        <p class="muted" style="margin:6px 0 0">Standard 80mm (8 cm) POS receipt printer layout for all deliveries.</p>
                     </div>
                     <div class="actions">
                         <a class="btn btn-secondary" href="invoices.php">← Back to Invoices</a>
-                        <button class="btn btn-primary" type="button" onclick="window.print()">🖨 Print Invoice</button>
+                        <button class="btn btn-primary" type="button" onclick="window.print()">🖨 Print 8cm Invoice</button>
+                        <a class="btn btn-secondary" href="invoices.php?view=<?= $viewId ?>&mode=receipt" target="_blank" title="Open Standalone 8cm Receipt">📄 Standalone Receipt</a>
                     </div>
                 </div>
 
+                <div class="invoice-paper-wrapper">
+                    
                 <div class="invoice-paper">
-                    <div class="invoice-title">
-                        <div>
-                            <h2>INVOICE</h2>
-                            <p style="margin:0;color:#667085">Hotel Supply Management</p>
-                            <p style="margin:5px 0 0;font-size:12px;color:#667085">
-                                Delivery-based invoice
-                            </p>
-                        </div>
-                        <div class="invoice-number">
-                            <strong><?= e($viewInvoice['InvoiceNo']) ?></strong>
-                            <p style="margin:8px 0">
-                                <span class="status-badge <?= e($displayClass) ?>"><?= e($displayStatus) ?></span>
-                            </p>
-                            <p style="margin:5px 0;font-size:12px">Invoice date: <?= e($viewInvoice['InvoiceDate']) ?></p>
-                            <p style="margin:5px 0;font-size:12px">Due date: <?= e($viewInvoice['DueDate']) ?></p>
-                        </div>
+                    <div class="thermal-header">
+                        <div class="brand-name">HOTEL SUPPLY MANAGEMENT</div>
+                        <div class="brand-sub">Wholesale Hotel & Food Supplies</div>
+                        <div class="brand-sub">Colombo, Sri Lanka · Tel: +94 77 123 4567</div>
+                        <div class="receipt-divider-double"></div>
+                        <div class="receipt-title">DELIVERY INVOICE</div>
+                        <div class="receipt-divider-dash"></div>
                     </div>
 
-                    <div class="invoice-info">
-                        <div>
-                            <h3>Bill To</h3>
-                            <p><strong><?= e($viewInvoice['HotelName']) ?></strong></p>
-                            <?php if ($viewInvoice['ContactPerson']): ?>
-                                <p><?= e($viewInvoice['ContactPerson']) ?></p>
-                            <?php endif; ?>
-                            <?php if ($viewInvoice['HotelAddress']): ?>
-                                <p><?= nl2br(e($viewInvoice['HotelAddress'])) ?></p>
-                            <?php endif; ?>
-                            <?php if ($viewInvoice['HotelPhone']): ?>
-                                <p>Phone: <?= e($viewInvoice['HotelPhone']) ?></p>
-                            <?php endif; ?>
-                            <?php if ($viewInvoice['HotelEmail']): ?>
-                                <p>Email: <?= e($viewInvoice['HotelEmail']) ?></p>
-                            <?php endif; ?>
-                        </div>
-                        <div>
-                            <h3>Delivery Information</h3>
-                            <p>Delivery ID: <strong>#<?= (int)$viewInvoice['DeliveryID'] ?></strong></p>
-                            <p>Delivery reference: <strong><?= e($viewInvoice['DeliveryNo'] ?: '—') ?></strong></p>
-                            <p>Delivery date: <?= e($viewInvoice['DeliveryDate']) ?></p>
-                            <p>Hotel order: #<?= (int)$viewInvoice['OrderID'] ?></p>
-                        </div>
+                    <div class="thermal-meta">
+                        <div class="meta-row"><span>Invoice No:</span><strong><?= e($viewInvoice['InvoiceNo']) ?></strong></div>
+                        <div class="meta-row"><span>Invoice Date:</span><span><?= e($viewInvoice['InvoiceDate']) ?></span></div>
+                        <div class="meta-row"><span>Due Date:</span><span><?= e($viewInvoice['DueDate']) ?></span></div>
+                        <div class="meta-row"><span>Order Ref:</span><span>#<?= (int)$viewInvoice['OrderID'] ?></span></div>
+                        <div class="meta-row"><span>Delivery Ref:</span><span><?= e($viewInvoice['DeliveryNo'] ?: '#' . (int)$viewInvoice['DeliveryID']) ?></span></div>
+                        <div class="meta-row"><span>Delivery Date:</span><span><?= e($viewInvoice['DeliveryDate']) ?></span></div>
+                        <div class="meta-row"><span>Status:</span><strong class="receipt-status <?= e($displayClass) ?>"><?= strtoupper(e($displayStatus)) ?></strong></div>
                     </div>
 
-                    <div class="table-wrap">
-                        <table class="invoice-items">
-                            <thead>
-                                <tr>
-                                    <th style="width:8%">#</th>
-                                    <th>Item Description</th>
-                                    <th>Quantity</th>
-                                    <th class="text-right">Unit Price</th>
-                                    <th class="text-right">Line Total</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                            <?php foreach ($invoiceItems as $index => $item): ?>
-                                <tr>
-                                    <td><?= $index + 1 ?></td>
-                                    <td>
-                                        <strong><?= e($item['ItemName']) ?></strong>
-                                        <?php if ($item['ItemCode']): ?>
-                                            <div style="font-size:11px;color:#667085;margin-top:4px">
-                                                Code: <?= e($item['ItemCode']) ?>
-                                            </div>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td><?= e(number_format((float)$item['SuppliedQuantity'], 3)) ?> <?= e($item['UnitSymbol']) ?></td>
-                                    <td class="text-right"><?= invoiceMoney($item['UnitPrice']) ?></td>
-                                    <td class="text-right"><?= invoiceMoney($item['LineTotal']) ?></td>
-                                </tr>
-                            <?php endforeach; ?>
+                    <div class="receipt-divider-dash"></div>
 
-                            <?php if (!$invoiceItems): ?>
-                                <tr><td colspan="5" class="empty-state">No delivery items found.</td></tr>
-                            <?php endif; ?>
-                            </tbody>
-                        </table>
+                    <div class="thermal-customer">
+                        <div class="section-label">BILL TO (CUSTOMER):</div>
+                        <div class="customer-name"><?= e($viewInvoice['HotelName']) ?></div>
+                        <?php if ($viewInvoice['ContactPerson']): ?>
+                            <div class="customer-sub">Attn: <?= e($viewInvoice['ContactPerson']) ?></div>
+                        <?php endif; ?>
+                        <?php if ($viewInvoice['HotelPhone']): ?>
+                            <div class="customer-sub">Tel: <?= e($viewInvoice['HotelPhone']) ?></div>
+                        <?php endif; ?>
+                        <?php if ($viewInvoice['HotelAddress']): ?>
+                            <div class="customer-sub"><?= nl2br(e($viewInvoice['HotelAddress'])) ?></div>
+                        <?php endif; ?>
                     </div>
 
-                    <div class="invoice-totals">
-                        <div class="total-row">
-                            <span>Invoice total</span>
-                            <strong><?= invoiceMoney($invoiceTotal) ?></strong>
+                    <div class="receipt-divider-double"></div>
+
+                    <table class="thermal-items-table">
+                        <thead>
+                            <tr>
+                                <th class="th-item">ITEM / CODE</th>
+                                <th class="th-qty">QTY</th>
+                                <th class="th-price">PRICE</th>
+                                <th class="th-total">TOTAL</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php
+                        $totalItemsCount = count($invoiceItems);
+                        $totalQtySum = 0;
+                        foreach ($invoiceItems as $item):
+                            $totalQtySum += (float)$item['SuppliedQuantity'];
+                            $isNos = strtoupper((string)($item['UnitSymbol'] ?? '')) === 'NOS';
+                        ?>
+                            <tr class="item-main-row">
+                                <td colspan="4" class="item-name"><?= e($item['ItemName']) ?></td>
+                            </tr>
+                            <tr class="item-details-row">
+                                <td class="item-code-unit">
+                                    <?= e($item['ItemCode'] ?: '—') ?> (<?= e($item['UnitSymbol'] ?: 'NOS') ?>)
+                                </td>
+                                <td class="item-qty">
+                                    <?= e(number_format((float)$item['SuppliedQuantity'], $isNos ? 0 : 3)) ?>
+                                </td>
+                                <td class="item-price">
+                                    <?= invoiceMoney($item['UnitPrice']) ?>
+                                </td>
+                                <td class="item-total">
+                                    <?= invoiceMoney($item['LineTotal']) ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php if (!$invoiceItems): ?>
+                            <tr><td colspan="4" style="text-align:center;padding:10px;font-style:italic">No items on this invoice.</td></tr>
+                        <?php endif; ?>
+                        </tbody>
+                    </table>
+
+                    <div class="receipt-divider-dash"></div>
+
+                    <div class="thermal-totals">
+                        <div class="totals-row">
+                            <span>Item Lines:</span>
+                            <span><?= $totalItemsCount ?> item(s)</span>
                         </div>
-                        <div class="total-row">
-                            <span>Payments allocated</span>
-                            <strong><?= invoiceMoney($invoicePaid) ?></strong>
+                        <div class="totals-row">
+                            <span>Total Quantity:</span>
+                            <span><?= number_format($totalQtySum, 3) ?></span>
                         </div>
-                        <div class="total-row grand-total">
-                            <span>Balance due</span>
-                            <span><?= invoiceMoney($invoiceBalance) ?></span>
+                        <div class="receipt-divider-dash"></div>
+                        <div class="totals-row">
+                            <span>SUBTOTAL:</span>
+                            <strong>Rs. <?= invoiceMoney($invoiceTotal) ?></strong>
                         </div>
+                        <div class="totals-row">
+                            <span>PAID AMOUNT:</span>
+                            <span>Rs. <?= invoiceMoney($invoicePaid) ?></span>
+                        </div>
+                        <div class="receipt-divider-double"></div>
+                        <div class="totals-row grand-total-row">
+                            <span>BALANCE DUE:</span>
+                            <strong>Rs. <?= invoiceMoney($invoiceBalance) ?></strong>
+                        </div>
+                        <div class="receipt-divider-double"></div>
                     </div>
 
                     <?php if (!empty($viewInvoice['Notes'])): ?>
-                        <div class="invoice-note">
-                            <strong>Notes</strong>
-                            <p><?= nl2br(e($viewInvoice['Notes'])) ?></p>
+                        <div class="thermal-notes">
+                            <strong>Notes:</strong> <?= nl2br(e($viewInvoice['Notes'])) ?>
                         </div>
+                        <div class="receipt-divider-dash"></div>
                     <?php endif; ?>
 
-                    <div class="invoice-note">
-                        Thank you for your business.
+                    <div class="thermal-footer">
+                        <div class="footer-msg">Thank you for your business!</div>
+                        <div class="footer-sub">Goods received in good condition.</div>
+                        <div class="signature-block">
+                            <div class="sig-line">Customer Signature: _______________________</div>
+                            <div class="sig-date">Date: ___________________________________</div>
+                        </div>
+                        <div class="print-time">Printed: <?= date('Y-m-d H:i:s') ?></div>
+                        <div class="cut-line">· · · · · · · · · · · · · · · · · · · · · · · ·</div>
                     </div>
+                </div>
                 </div>
             </section>
         <?php endif; ?>
@@ -707,7 +1057,10 @@ unset($_SESSION['invoice_flash']);
                             <td>
                                 <div class="actions">
                                     <a class="btn btn-primary btn-small"
-                                       href="invoices.php?view=<?= (int)$invoice['InvoiceID'] ?>">View / Print</a>
+                                       href="invoices.php?view=<?= (int)$invoice['InvoiceID'] ?>">View (8cm)</a>
+                                    <a class="btn btn-secondary btn-small"
+                                       href="invoices.php?view=<?= (int)$invoice['InvoiceID'] ?>&mode=receipt&print=1" target="_blank"
+                                       title="Quick 8cm Thermal Print">🖨 Print</a>
                                 </div>
                             </td>
                         </tr>

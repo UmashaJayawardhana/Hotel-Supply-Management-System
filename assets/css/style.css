@@ -361,4 +361,117 @@ footer {
     footer {
         flex-direction: column;
     }
+
+
+/* User details */
+.sidebar-user {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin: 18px 12px 20px;
+    padding: 14px 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.sidebar-user strong {
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.sidebar-user small {
+    color: #a5b4fc;
+    font-size: 12px;
+    text-transform: capitalize;
+}
+
+/* Logout form */
+.sidebar .sidebar-logout-form {
+    margin: 20px 12px 16px;
+    padding: 0;
+}
+
+/* Logout button */
+.sidebar .sidebar-logout-button {
+    appearance: none;
+    -webkit-appearance: none;
+
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    width: 100%;
+    min-height: 46px;
+    padding: 8px 12px;
+    margin: 0;
+
+    background: rgba(255, 255, 255, 0.05);
+    color: #cbd5e1;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    text-align: left;
+    line-height: 1.4;
+
+    cursor: pointer;
+    transition: all 0.25s ease;
+}
+
+/* Logout icon */
+.sidebar .sidebar-logout-button .logout-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+
+    width: 30px;
+    height: 30px;
+
+    border-radius: 8px;
+    background: rgba(248, 113, 113, 0.12);
+    color: #f87171;
+    font-size: 19px;
+
+    transition: all 0.25s ease;
+}
+
+/* Right arrow */
+.sidebar .sidebar-logout-button .logout-arrow {
+    margin-left: auto;
+    opacity: 0;
+    transform: translateX(-5px);
+    transition: all 0.25s ease;
+}
+
+/* Hover effect */
+.sidebar .sidebar-logout-button:hover {
+    background: rgba(239, 68, 68, 0.13);
+    color: #ffffff;
+    border-color: rgba(248, 113, 113, 0.4);
+    transform: translateX(3px);
+}
+
+.sidebar .sidebar-logout-button:hover .logout-icon {
+    background: #dc3545;
+    color: #ffffff;
+}
+
+.sidebar .sidebar-logout-button:hover .logout-arrow {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+/* Keyboard accessibility */
+.sidebar .sidebar-logout-button:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 3px;
+}
+
+.sidebar .sidebar-logout-button:active {
+    transform: scale(0.98);
+}
+
 }

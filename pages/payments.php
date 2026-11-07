@@ -2,6 +2,8 @@
 <?php
 session_start();
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/auth.php';
+requireLogin();
 
 function e($value): string
 {
@@ -781,7 +783,19 @@ if (!$formAllocations) {
             <div class="brand-icon">HS</div>
             <div><h2>Hotel Supply</h2><small>Management System</small></div>
         </div>
-
+<?php
+if (empty($_SESSION['logout_csrf_token'])) {
+    $_SESSION['logout_csrf_token'] = bin2hex(random_bytes(32));
+}
+?>
+<div class="sidebar-user">
+    <strong>
+        <?= htmlspecialchars($_SESSION['user_name'] ?? 'User', ENT_QUOTES, 'UTF-8') ?>
+    </strong>
+    <small>
+        <?= htmlspecialchars($_SESSION['user_role'] ?? '', ENT_QUOTES, 'UTF-8') ?>
+    </small>
+</div>
         <p class="menu-label">MAIN MENU</p>
         <a class="nav-link" href="../index.php">▦ &nbsp; Dashboard</a>
         <a class="nav-link" href="categories.php">▤ &nbsp; Categories</a>
@@ -798,6 +812,24 @@ if (!$formAllocations) {
         <a class="nav-link" href="invoices.php">📄 &nbsp; Invoices</a>
         <a class="nav-link active" href="payments.php">💳 &nbsp; Payments</a>
         <a class="nav-link" href="reports.php">📊 &nbsp; Reports</a>
+        <?php if (isAdmin()): ?>
+    <a class="nav-link" href="pages/users.php">
+        👥 &nbsp; User Management
+    </a>
+<?php endif; ?>
+<form action="logout.php" method="POST" class="sidebar-logout-form">
+    <input
+        type="hidden"
+        name="csrf_token"
+        value="<?= htmlspecialchars($_SESSION['logout_csrf_token'], ENT_QUOTES, 'UTF-8') ?>"
+    >
+
+    <button type="submit" class="sidebar-logout-button">
+        <span class="logout-icon">↪</span>
+        <span>Logout</span>
+        <span class="logout-arrow">→</span>
+    </button>
+</form>
     </aside>
 
     <main class="main">

@@ -2,6 +2,8 @@
 <?php
 session_start();
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/auth.php';
+requireLogin();
 
 if (!isset($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -74,35 +76,21 @@ function syncHotelOrderStatus(PDO $pdo, int $orderId): void
         return;
     }
 
-    $quantityStmt = $pdo->prepare(
-        "SELECT
-            COALESCE(SUM(od.OrderedQuantity), 0) AS OrderedQty,
-            COALESCE(SUM(
-                COALESCE((
-                    SELECT SUM(dd.SuppliedQuantity)
-                    FROM delivery_detail dd
-                    INNER JOIN delivery d ON d.DeliveryID = dd.DeliveryID
-                    WHERE dd.OrderDetailID = od.OrderDetailID
-                      AND d.Status = 'Completed'
-                ), 0)
-            ), 0) AS SuppliedQty
-         FROM hotel_order_detail od
-         WHERE od.OrderID = ?"
+    // Check if there is any completed delivery for this order
+    $completedStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM delivery WHERE OrderID = ? AND Status = 'Completed'"
     );
+    $completedStmt->execute([$orderId]);
+    $hasCompleted = (int)$completedStmt->fetchColumn() > 0;
 
-    $quantityStmt->execute([$orderId]);
-    $totals = $quantityStmt->fetch(PDO::FETCH_ASSOC);
-
-    $ordered = (float)$totals['OrderedQty'];
-    $supplied = (float)$totals['SuppliedQty'];
-
-    if ($ordered > 0 && $supplied >= $ordered - 0.000001) {
+    if ($hasCompleted) {
+        // When a delivery is completed and invoice is created, mark order as complete (Delivered),
+        // even if some item quantities were reduced or less than the ordered amounts.
         $newStatus = 'Delivered';
-    } elseif ($supplied > 0) {
-        $newStatus = 'Partially Delivered';
     } else {
-        // Do not automatically reopen an order that was manually confirmed.
-        $newStatus = $currentStatus === 'Confirmed' ? 'Confirmed' : 'Received';
+        // No completed deliveries yet (e.g. only Draft or Cancelled, or none).
+        // Keep order Confirmed or Received; do not mark as partially delivered.
+        $newStatus = ($currentStatus === 'Received') ? 'Received' : 'Confirmed';
     }
 
     $updateStmt = $pdo->prepare(
@@ -553,7 +541,7 @@ $eligibleOrdersSql = "
            (SELECT d.DeliveryID FROM delivery d WHERE d.OrderID = o.OrderID AND d.Status = 'Draft' ORDER BY d.DeliveryID DESC LIMIT 1) AS DraftDeliveryID
     FROM hotel_order o
     INNER JOIN hotel h ON h.HotelID = o.HotelID
-    WHERE (o.Status IN ('Confirmed', 'Partially Delivered', 'Delivered')
+    WHERE (o.Status IN ('Confirmed', 'Partially Delivered')
            OR EXISTS (SELECT 1 FROM delivery d WHERE d.OrderID = o.OrderID AND d.Status = 'Draft'))
       AND EXISTS (
           SELECT 1
@@ -888,6 +876,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
             <div class="brand-icon">HS</div>
             <div><h2>Hotel Supply</h2><small>Management System</small></div>
         </div>
+
+        <?php
+if (empty($_SESSION['logout_csrf_token'])) {
+    $_SESSION['logout_csrf_token'] = bin2hex(random_bytes(32));
+}
+?>
+<div class="sidebar-user">
+    <strong>
+        <?= htmlspecialchars($_SESSION['user_name'] ?? 'User', ENT_QUOTES, 'UTF-8') ?>
+    </strong>
+    <small>
+        <?= htmlspecialchars($_SESSION['user_role'] ?? '', ENT_QUOTES, 'UTF-8') ?>
+    </small>
+</div>
+
+
         <p class="menu-label">MAIN MENU</p>
         <a class="nav-link" href="../index.php">▦ &nbsp; Dashboard</a>
         <a class="nav-link" href="categories.php">▤ &nbsp; Categories</a>
@@ -903,6 +907,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         <a class="nav-link" href="invoices.php">📄 &nbsp; Invoices</a>
         <a class="nav-link" href="payments.php">💳 &nbsp; Payments</a>
         <a class="nav-link" href="reports.php">📊 &nbsp; Reports</a>
+        <?php if (isAdmin()): ?>
+    <a class="nav-link" href="pages/users.php">
+        👥 &nbsp; User Management
+    </a>
+<?php endif; ?>
+<form action="logout.php" method="POST" class="sidebar-logout-form">
+    <input
+        type="hidden"
+        name="csrf_token"
+        value="<?= htmlspecialchars($_SESSION['logout_csrf_token'], ENT_QUOTES, 'UTF-8') ?>"
+    >
+
+    <button type="submit" class="sidebar-logout-button">
+        <span class="logout-icon">↪</span>
+        <span>Logout</span>
+        <span class="logout-arrow">→</span>
+    </button>
+</form>
     </aside>
 
     <main class="main">
@@ -1089,7 +1111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                             </div>
 
                             <p class="help" style="margin-top:10px">
-                                Enter the quantity to deliver now. Leave blank or enter 0 for items not being delivered. Quantities can be less than or more than the ordered values. As long as at least one item is being delivered, this can be saved as a draft or completed.
+                                Enter the quantity to deliver now. Leave blank or enter 0 for items not being delivered. Quantities can be less than the ordered values. Clicking <strong>Save as Draft</strong> preserves your delivery as a draft. Clicking <strong>Complete Delivery &amp; Create Invoice</strong> finalizes the delivery and marks the order as Delivered (Complete).
                             </p>
 
                             <div class="form-actions">
@@ -1184,7 +1206,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                             </td>
                             <td>
                                 <?php if ((int)$delivery['InvoiceCount'] > 0): ?>
-                                    <a href="invoices.php?view=<?= (int)$delivery['InvoiceID'] ?>">View Invoice</a>
+                                    <div style="display:flex;gap:4px;flex-wrap:wrap">
+                                        <a class="btn btn-secondary btn-small" href="invoices.php?view=<?= (int)$delivery['InvoiceID'] ?>">📄 8cm Invoice</a>
+                                        <a class="btn btn-secondary btn-small" href="invoices.php?view=<?= (int)$delivery['InvoiceID'] ?>&mode=receipt&print=1" target="_blank" title="Direct 8cm Thermal Print">🖨 Print</a>
+                                    </div>
                                 <?php else: ?>
                                     <span class="muted">Not invoiced</span>
                                 <?php endif; ?>
